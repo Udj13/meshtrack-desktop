@@ -10,8 +10,8 @@
 
 | # | Фаза | Статус |
 |---|---|---|
-| 0 | Скелет: parser, fake_serial, env, Qt-окно | ⛶ |
-| 1 | Живые маркеры: serial-QThread → repo → bridge → Leaflet | ⛶ |
+| 0 | Скелет: parser, fake_serial, env, Qt-окно | ✅ |
+| 1 | Живые маркеры: serial-QThread → repo → bridge → Leaflet | 🔄 |
 | 2 | Вектор GS/курс/варио + панель трекеров | ⛶ |
 | 3 | История и треки, фильтры по дате | ⛶ |
 | 4 | Карты: first-run мастер, downloader, MBTiles, map:// | ⛶ |

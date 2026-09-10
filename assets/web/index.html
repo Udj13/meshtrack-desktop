@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshTrack</title>
+    <link rel="stylesheet" href="leaflet.css">
+    <style>
+        html, body, #map {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #e0e0e0;
+        }
+        .tracker-marker {
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: rgba(0,0,0,0.7);
+        }
+        .tracker-marker.sos {
+            animation: sos-pulse 1s infinite;
+        }
+        @keyframes sos-pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(255,0,0,0.7); }
+            70%  { box-shadow: 0 0 0 10px rgba(255,0,0,0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,0,0,0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script src="leaflet.js"></script>
+    <script src="qwebchannel.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
