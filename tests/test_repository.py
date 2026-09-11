@@ -56,3 +56,65 @@ def test_wal_mode(repo: Repository):
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
     conn.close()
+
+
+def test_points_filter_by_period(repo: Repository):
+    now = time.time()
+    # boon1: точки вчера, сегодня и завтра
+    repo.add_position("boon1", 54.0, 45.0, alt=100, ts=now - 86400)
+    repo.add_position("boon1", 54.1, 45.1, alt=200, ts=now - 3600)
+    repo.add_position("boon1", 54.2, 45.2, alt=300, ts=now + 3600)
+
+    pts = repo.points("boon1", ts_from=now - 7200, ts_to=now + 100)
+    assert len(pts) == 1
+    assert pts[0]["alt"] == 200
+
+    pts_all = repo.points("boon1")
+    assert len(pts_all) == 3
+    assert pts_all[0]["ts"] < pts_all[-1]["ts"]
+
+
+def test_points_decimate_limit(repo: Repository):
+    now = time.time()
+    for i in range(2500):
+        repo.add_position("boon2", 54.0 + i * 0.0001, 45.0, alt=i, ts=now - 2500 + i)
+    pts = repo.points("boon2")
+    assert len(pts) <= 2000
+    # Первая и последняя точки должны сохраниться
+    assert pts[0]["alt"] == 0
+    assert pts[-1]["alt"] == 2499
+
+
+def test_decimate_points_function():
+    from meshtrack.repository import decimate_points
+
+    pts = [{"i": i} for i in range(10)]
+    assert decimate_points(pts, 20) == pts
+    assert decimate_points(pts, 0) == pts
+    assert decimate_points(pts, 1) == [{"i": 9}]
+    reduced = decimate_points(pts, 5)
+    assert len(reduced) == 5
+    assert reduced[0] == {"i": 0}
+    assert reduced[-1] == {"i": 9}
+
+
+def test_purge_old(repo: Repository):
+    now = time.time()
+    repo.add_position("boon3", 54.0, 45.0, ts=now - 100 * 86400)
+    repo.add_position("boon3", 54.1, 45.1, ts=now - 10 * 86400)
+    repo.add_position("boon3", 54.2, 45.2, ts=now)
+
+    deleted = repo.purge_old(30)
+    assert deleted == 1
+    assert len(repo.points("boon3")) == 2
+
+
+def test_clear_all_positions(repo: Repository):
+    repo.add_position("boon4", 54.0, 45.0)
+    repo.add_position("boon4", 54.1, 45.1)
+    assert len(repo.points("boon4")) == 2
+    deleted = repo.clear_all_positions()
+    assert deleted == 2
+    assert repo.points("boon4") == []
+    # trackers остаются
+    assert "boon4" in repo.all_trackers()

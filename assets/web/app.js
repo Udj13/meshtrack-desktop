@@ -20,6 +20,31 @@ function formatAge(tsSec) {
     return Math.floor(dt / 60) + " мин";
 }
 
+// --- Цветовые режимы трека ---
+function colorForAltitude(alt) {
+    // синий (0 м) -> красный (4000 м)
+    const a = Math.max(0, Math.min(4000, alt || 0)) / 4000;
+    const r = Math.round(255 * a);
+    const b = Math.round(255 * (1 - a));
+    return `rgb(${r}, 0, ${b})`;
+}
+
+function colorForVario(vario) {
+    // зелёный (+5 м/с) → серый (0) → красный (−5 м/с)
+    const v = Math.max(-5, Math.min(5, vario || 0));
+    if (v >= 0) {
+        const k = v / 5; // 0..1
+        const r = Math.round(128 * (1 - k));
+        const g = Math.round(128 + 127 * k);
+        return `rgb(${r}, ${g}, ${r})`;
+    } else {
+        const k = -v / 5; // 0..1
+        const g = Math.round(128 * (1 - k));
+        const b = Math.round(128 * (1 - k));
+        return `rgb(255, ${g}, ${b})`;
+    }
+}
+
 const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
 
 // Фон пока серый; в Фазе 4 подключим offline MBTiles через map://
@@ -27,7 +52,12 @@ L.tileLayer("", { attribution: "" }).addTo(map);
 
 const markers = {};
 const arrows = {};
+const trackLayers = {};
+const visibleTracks = new Set();
 let firstPosition = true;
+
+let trackFilter = { from: 0, to: 0 };
+let trackColorMode = "palette";
 
 function makeMarkerHtml(color, trend, sos) {
     return `<div class="tracker-marker${sos ? " sos" : ""}" style="
@@ -132,9 +162,98 @@ function centerTracker(id) {
     }
 }
 
+// --- Треки ---
+function removeTrack(id) {
+    const layer = trackLayers[id];
+    if (layer) {
+        map.removeLayer(layer);
+        delete trackLayers[id];
+    }
+}
+
+function drawTrack(id, points, mode) {
+    removeTrack(id);
+    if (!points || points.length < 2) return;
+
+    const color = colorForId(id);
+
+    if (mode === "palette") {
+        const latlngs = points.map(p => [p.lat, p.lon]);
+        trackLayers[id] = L.polyline(latlngs, {
+            color: color,
+            weight: 3,
+            opacity: 0.85
+        }).addTo(map);
+        return;
+    }
+
+    const group = L.layerGroup().addTo(map);
+    for (let i = 1; i < points.length; i++) {
+        const p1 = points[i - 1];
+        const p2 = points[i];
+        let segColor;
+        if (mode === "altitude") {
+            segColor = colorForAltitude(((p1.alt || 0) + (p2.alt || 0)) / 2);
+        } else { // vario
+            const dt = p2.ts - p1.ts;
+            const vario = dt > 0 ? ((p2.alt || 0) - (p1.alt || 0)) / dt : 0;
+            segColor = colorForVario(vario);
+        }
+        L.polyline([[p1.lat, p1.lon], [p2.lat, p2.lon]], {
+            color: segColor,
+            weight: 3,
+            opacity: 0.85
+        }).addTo(group);
+    }
+    trackLayers[id] = group;
+}
+
+function loadTrack(id) {
+    if (!bridge) return;
+    bridge.getTrack(id, trackFilter.from, trackFilter.to, function(jsonStr) {
+        try {
+            const data = JSON.parse(jsonStr);
+            drawTrack(id, data.points, trackColorMode);
+        } catch (e) {
+            console.error("loadTrack parse error:", e);
+        }
+    });
+}
+
 function toggleTrack(id) {
-    // Заглушка для Фазы 2; полноценный трек появится в Фазе 3
-    console.log("toggleTrack requested for", id);
+    if (visibleTracks.has(id)) {
+        visibleTracks.delete(id);
+        removeTrack(id);
+    } else {
+        visibleTracks.add(id);
+        loadTrack(id);
+    }
+}
+
+function setTrackFilter(fromTs, toTs) {
+    trackFilter.from = fromTs;
+    trackFilter.to = toTs;
+    refreshVisibleTracks();
+}
+
+function setTrackColorMode(mode) {
+    trackColorMode = mode;
+    refreshVisibleTracks();
+}
+
+function refreshVisibleTracks() {
+    visibleTracks.forEach(function(id) {
+        loadTrack(id);
+    });
+}
+
+function clearAllTracks() {
+    visibleTracks.forEach(removeTrack);
+    visibleTracks.clear();
+}
+
+function onHistoryCleared() {
+    clearAllTracks();
 }
 
 function onPosition(pos) {
@@ -145,11 +264,21 @@ function onPosition(pos) {
     }
 }
 
+let bridge = null;
+
 if (typeof qt !== "undefined") {
     new QWebChannel(qt.webChannelTransport, function(channel) {
-        const bridge = channel.objects.bridge;
+        bridge = channel.objects.bridge;
         if (bridge) {
             bridge.positionReceived.connect(onPosition);
+            if (bridge.historyCleared) {
+                bridge.historyCleared.connect(onHistoryCleared);
+            }
+            if (bridge.getColorMode) {
+                bridge.getColorMode(function(mode) {
+                    if (mode) trackColorMode = mode;
+                });
+            }
             console.log("bridge connected");
         } else {
             console.error("bridge not found in QWebChannel");

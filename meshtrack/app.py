@@ -9,21 +9,27 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, QUrl, Qt, Signal
+from PySide6.QtCore import QDateTime, QTime, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDateTimeEdit,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
     QPlainTextEdit,
+    QPushButton,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QToolBar,
     QVBoxLayout,
     QWidget,
 )
@@ -32,6 +38,7 @@ from .derivation import derive
 from .logutil import QtLogHandler, setup_logging
 from .repository import Repository
 from .serial_worker import SerialWorker
+from .settings import Settings
 from .webbridge import WebBridge
 
 # Палитра трекеров (PROJECT.md §5)
@@ -194,6 +201,13 @@ class MainWindow(QMainWindow):
         data_dir = app_data_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Настройки
+        self.settings = Settings(data_dir / "config.json")
+        try:
+            self.settings.save()
+        except Exception:
+            pass  # логирование ещё не настроено
+
         # Логирование
         log_level = logging.DEBUG if debug else logging.INFO
         self.logger = setup_logging(data_dir / "meshtrack.log", level=log_level)
@@ -202,6 +216,14 @@ class MainWindow(QMainWindow):
 
         self.repo = Repository(str(data_dir / "meshtrack.db"))
         self.logger.info("База данных: %s", data_dir / "meshtrack.db")
+
+        # Очистка истории по retention_days
+        try:
+            purged = self.repo.purge_old(self.settings.retention_days)
+            if purged:
+                self.logger.info("Удалено %d старых позиций (retention=%d дней)", purged, self.settings.retention_days)
+        except Exception:
+            self.logger.exception("Ошибка очистки старой истории")
 
         # Центральная область: карта + панель трекеров
         central = QWidget()
@@ -230,12 +252,20 @@ class MainWindow(QMainWindow):
         self._track_history_seconds = 600
         self._points_cache: dict[str, list[tuple[float, float, float, float | None]]] = {}
 
+        # Фильтры треков и видимые треки (видимость управляется в JS)
+        self._track_ts_from: float = 0.0
+        self._track_ts_to: float = 0.0
+        self._toolbar = None
+        self._filter_combo = None
+        self._color_combo = None
+
         # Логирование загрузки
         page = self.web.page()
         page.loadFinished.connect(self._on_web_load_finished)
+        self._web_loaded = False
 
         # WebChannel / bridge
-        self.bridge = WebBridge(self)
+        self.bridge = WebBridge(repo=self.repo, settings=self.settings, parent=self)
         self.channel = QWebChannel(self)
         self.channel.registerObject("bridge", self.bridge)
         page.setWebChannel(self.channel)
@@ -269,6 +299,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(QWidget(), 1)  # spacer
         self.statusBar().addWidget(self.port_combo)
 
+        # Toolbar: фильтры истории и цвет треков
+        self._setup_toolbar()
+
         # Dock-виджет с логом
         self.log_dock = QDockWidget("Лог", self)
         self.log_dock.setAllowedAreas(Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea)
@@ -284,6 +317,138 @@ class MainWindow(QMainWindow):
 
     def _on_web_load_finished(self, ok: bool):
         self.logger.info("WebView loadFinished ok=%s", ok)
+        if ok:
+            self._web_loaded = True
+            # Передать начальные фильтр и цветовой режим в JS
+            self._push_filter_to_js()
+            self._push_color_mode_to_js()
+
+    def _setup_toolbar(self):
+        toolbar = QToolBar("История и треки")
+        self.addToolBar(toolbar)
+        self._toolbar = toolbar
+
+        toolbar.addWidget(QLabel("История:"))
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItems(["Сегодня", "Вчера", "Период…"])
+        self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
+        toolbar.addWidget(self._filter_combo)
+
+        toolbar.addWidget(QLabel("Цвет трека:"))
+        self._color_combo = QComboBox()
+        self._color_combo.addItem("Палитра", "palette")
+        self._color_combo.addItem("Высота", "altitude")
+        self._color_combo.addItem("Варио", "vario")
+        index = self._color_combo.findData(self.settings.track_color_mode)
+        self._color_combo.blockSignals(True)
+        self._color_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._color_combo.blockSignals(False)
+        self._color_combo.currentIndexChanged.connect(self._on_color_mode_changed)
+        toolbar.addWidget(self._color_combo)
+
+        clear_btn = QPushButton("Очистить историю")
+        clear_btn.setToolTip("Удалить все сохранённые позиции")
+        clear_btn.clicked.connect(self._on_clear_history)
+        toolbar.addWidget(clear_btn)
+
+        # Начальное значение фильтра — сегодня
+        self._apply_filter_range(0)
+
+    def _on_filter_changed(self, index: int):
+        self._apply_filter_range(index)
+
+    def _apply_filter_range(self, index: int):
+        now = QDateTime.currentDateTime()
+        if index == 0:  # Сегодня
+            start = QDateTime(now.date(), QTime(0, 0, 0))
+            self._track_ts_from = start.toSecsSinceEpoch()
+            self._track_ts_to = now.toSecsSinceEpoch()
+        elif index == 1:  # Вчера
+            today = QDateTime(now.date(), QTime(0, 0, 0))
+            self._track_ts_from = today.addDays(-1).toSecsSinceEpoch()
+            self._track_ts_to = today.toSecsSinceEpoch()
+        else:  # Период
+            self._select_period_dialog()
+            return
+        if self._web_loaded:
+            self._push_filter_to_js()
+
+    def _select_period_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Выберите период")
+        layout = QVBoxLayout(dlg)
+
+        now = QDateTime.currentDateTime()
+        from_edit = QDateTimeEdit(now.addDays(-1))
+        from_edit.setCalendarPopup(True)
+        from_edit.setDisplayFormat("dd.MM.yyyy hh:mm")
+        to_edit = QDateTimeEdit(now)
+        to_edit.setCalendarPopup(True)
+        to_edit.setDisplayFormat("dd.MM.yyyy hh:mm")
+
+        form = QHBoxLayout()
+        form.addWidget(QLabel("С:"))
+        form.addWidget(from_edit)
+        form.addWidget(QLabel("По:"))
+        form.addWidget(to_edit)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        if dlg.exec() == QDialog.Accepted:
+            self._track_ts_from = from_edit.dateTime().toSecsSinceEpoch()
+            self._track_ts_to = to_edit.dateTime().toSecsSinceEpoch()
+            self._push_filter_to_js()
+        else:
+            # Вернуть выбор на предыдущий активный фильтр
+            self._filter_combo.blockSignals(True)
+            self._filter_combo.setCurrentIndex(0)
+            self._filter_combo.blockSignals(False)
+            self._apply_filter_range(0)
+
+    def _push_filter_to_js(self):
+        self.web.page().runJavaScript(
+            f"setTrackFilter({self._track_ts_from}, {self._track_ts_to})"
+        )
+
+    def _push_color_mode_to_js(self):
+        mode = self._color_combo.currentData()
+        if mode:
+            self.web.page().runJavaScript(f'setTrackColorMode("{mode}")')
+
+    def _on_color_mode_changed(self, index: int):
+        mode = self._color_combo.itemData(index)
+        if mode:
+            self.settings.track_color_mode = mode
+            try:
+                self.settings.save()
+            except Exception:
+                self.logger.exception("Ошибка сохранения настроек")
+            if self._web_loaded:
+                self._push_color_mode_to_js()
+
+    def _refresh_visible_tracks(self):
+        self.web.page().runJavaScript("refreshVisibleTracks()")
+
+    def _on_clear_history(self):
+        from PySide6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Очистить историю",
+            "Удалить все сохранённые позиции трекеров?\nТекущие маркеры останутся на карте до закрытия.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            try:
+                deleted = self.repo.clear_all_positions()
+                self.logger.info("История очищена, удалено позиций: %d", deleted)
+                self.bridge.clearHistory()
+            except Exception:
+                self.logger.exception("Ошибка очистки истории")
 
     def _refresh_ports(self):
         """Заполняет комбобокс портами; если ровно 1 — подключаемся."""

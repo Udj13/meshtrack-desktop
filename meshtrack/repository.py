@@ -7,6 +7,23 @@ import time
 from pathlib import Path
 
 
+MAX_TRACK_POINTS = 2000
+
+
+def decimate_points(points: list[dict], limit: int = MAX_TRACK_POINTS) -> list[dict]:
+    """Редуцирует список точек до limit, равномерно сохраняя первую и последнюю.
+
+    Используется stride-подобный подбор индексов; дубликаты исключаются.
+    """
+    n = len(points)
+    if n <= limit or limit <= 0:
+        return points
+    if limit == 1:
+        return [points[-1]]
+    indices = {int(round(i * (n - 1) / (limit - 1))) for i in range(limit)}
+    return [points[i] for i in sorted(indices)]
+
+
 class Repository:
     """Хранит позиции и мета-информацию трекеров.
 
@@ -125,3 +142,50 @@ class Repository:
                 "SELECT id FROM trackers ORDER BY id"
             ).fetchall()
             return [r["id"] for r in rows]
+
+    def points(
+        self,
+        tracker_id: str,
+        ts_from: float | None = None,
+        ts_to: float | None = None,
+        limit: int = MAX_TRACK_POINTS,
+    ) -> list[dict]:
+        """Возвращает точки трека за период, редуцированные до limit.
+
+        Формат элемента: {"ts": float, "lat": float, "lon": float, "alt": float|None}.
+        """
+        where = ["tracker_id = ?"]
+        params: list = [tracker_id]
+        if ts_from is not None:
+            where.append("ts >= ?")
+            params.append(ts_from)
+        if ts_to is not None:
+            where.append("ts <= ?")
+            params.append(ts_to)
+
+        sql = f"""SELECT ts, lat, lon, alt FROM positions
+                  WHERE {' AND '.join(where)}
+                  ORDER BY ts ASC"""
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+
+        pts = [
+            {"ts": r["ts"], "lat": r["lat"], "lon": r["lon"], "alt": r["alt"]}
+            for r in rows
+        ]
+        return decimate_points(pts, limit)
+
+    def purge_old(self, days: int) -> int:
+        """Удаляет позиции старше days дней. Возвращает количество удалённых строк."""
+        if days <= 0:
+            return 0
+        cutoff = time.time() - days * 86400
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM positions WHERE ts < ?", (cutoff,))
+            return cur.rowcount
+
+    def clear_all_positions(self) -> int:
+        """Удаляет все позиции (очистка истории). Возвращает количество удалённых строк."""
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM positions")
+            return cur.rowcount
