@@ -103,7 +103,7 @@ class Repository:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def last_points(self, tracker_id: str, seconds: float = 60) -> list[tuple]:
+    def last_points(self, tracker_id: str, seconds: float = 600) -> list[tuple]:
         """Возвращает последние точки трекера за seconds секунд.
 
         Формат: [(ts, lat, lon, alt), ...], отсортировано по ts.

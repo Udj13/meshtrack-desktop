@@ -9,7 +9,8 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Qt
+from PySide6.QtCore import QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -27,10 +28,35 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .derivation import derive
 from .logutil import QtLogHandler, setup_logging
 from .repository import Repository
 from .serial_worker import SerialWorker
 from .webbridge import WebBridge
+
+# Палитра трекеров (PROJECT.md §5)
+PALETTE = [
+    "#e6194b",
+    "#3cb44b",
+    "#ffe119",
+    "#4363d8",
+    "#f58231",
+    "#911eb4",
+    "#46f0f0",
+    "#f032e6",
+    "#bfef45",
+    "#3cb44b",
+    "#808000",
+    "#9a6324",
+]
+
+
+def color_for_id(tracker_id: str) -> str:
+    """Детерминированный цвет трекера по его id (совместим с JS)."""
+    h = 0
+    for ch in tracker_id:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return PALETTE[h % len(PALETTE)]
 
 
 def app_data_dir() -> Path:
@@ -56,11 +82,15 @@ def format_age(ts: float | None) -> str:
 class TrackerPanel(QWidget):
     """Правая панель: список активных трекеров."""
 
-    COLUMNS = ["ID", "Высота", "Заряд", "Напр.", "Обновлён"]
+    trackerClicked = Signal(str)
+    trackerDoubleClicked = Signal(str)
+
+    COLUMNS = ["", "ID", "GS", "Курс", "Варио", "Высота", "Заряд", "Напр.", "Обновлён"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._trackers: dict[str, dict] = {}
+        self._row_ids: list[str] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -72,11 +102,15 @@ class TrackerPanel(QWidget):
 
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.table.setColumnWidth(0, 24)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.cellClicked.connect(self._on_cell_clicked)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
         layout.addWidget(self.table)
 
     def update_tracker(self, pos: dict):
@@ -94,12 +128,18 @@ class TrackerPanel(QWidget):
             key=lambda item: (item[1].get("ts") or 0, item[0]),
             reverse=True,
         )
+        self._row_ids = [tid for tid, _ in ordered]
         self.table.setRowCount(len(ordered))
         for row, (tracker_id, pos) in enumerate(ordered):
+            color = pos.get("color") or color_for_id(tracker_id)
             alt = pos.get("altitude")
             batt = pos.get("batt")
             voltage = pos.get("voltage")
             ts = pos.get("ts")
+            gs = pos.get("gs_kmh")
+            course = pos.get("course_deg")
+            vario = pos.get("vario_ms")
+            trend = pos.get("trend") or "—"
 
             def _float(val):
                 try:
@@ -110,9 +150,23 @@ class TrackerPanel(QWidget):
             alt_f = _float(alt)
             batt_f = _float(batt)
             voltage_f = _float(voltage)
+            gs_f = _float(gs)
+            course_f = _float(course)
+            vario_f = _float(vario)
+
+            chip = QTableWidgetItem()
+            chip.setBackground(QColor(color))
+            chip.setFlags(chip.flags() & ~Qt.ItemIsSelectable)
+            chip.setToolTip(f"Цвет трекера {tracker_id}")
 
             items = [
+                chip,
                 QTableWidgetItem(str(tracker_id)),
+                QTableWidgetItem(f"{gs_f:.1f}" if gs_f is not None else "—"),
+                QTableWidgetItem(f"{course_f:.0f}°" if course_f is not None else "—"),
+                QTableWidgetItem(
+                    f"{vario_f:+.1f} {trend}" if vario_f is not None else "—"
+                ),
                 QTableWidgetItem(f"{alt_f:.0f} м" if alt_f is not None else "—"),
                 QTableWidgetItem(f"{batt_f:.0f}%" if batt_f is not None else "—"),
                 QTableWidgetItem(f"{(voltage_f / 1000):.2f} В" if voltage_f is not None else "—"),
@@ -120,6 +174,14 @@ class TrackerPanel(QWidget):
             ]
             for col, item in enumerate(items):
                 self.table.setItem(row, col, item)
+
+    def _on_cell_clicked(self, row: int, _column: int):
+        if 0 <= row < len(self._row_ids):
+            self.trackerClicked.emit(self._row_ids[row])
+
+    def _on_cell_double_clicked(self, row: int, _column: int):
+        if 0 <= row < len(self._row_ids):
+            self.trackerDoubleClicked.emit(self._row_ids[row])
 
 
 class MainWindow(QMainWindow):
@@ -156,10 +218,17 @@ class MainWindow(QMainWindow):
 
         # Панель трекеров
         self.tracker_panel = TrackerPanel()
-        self.tracker_panel.setMinimumWidth(280)
-        self.tracker_panel.setMaximumWidth(450)
+        self.tracker_panel.setMinimumWidth(300)
+        self.tracker_panel.setMaximumWidth(480)
+        self.tracker_panel.trackerClicked.connect(self._on_tracker_clicked)
+        self.tracker_panel.trackerDoubleClicked.connect(self._on_tracker_double_clicked)
         self.splitter.addWidget(self.tracker_panel)
-        self.splitter.setSizes([1100, 300])
+        self.splitter.setSizes([1100, 320])
+
+        # Кэш последних точек в RAM: 10 минут истории для трека,
+        # derivation внутри себя использует окно 60 с
+        self._track_history_seconds = 600
+        self._points_cache: dict[str, list[tuple[float, float, float, float | None]]] = {}
 
         # Логирование загрузки
         page = self.web.page()
@@ -178,6 +247,13 @@ class MainWindow(QMainWindow):
 
         # Serial
         self._worker: SerialWorker | None = None
+        self._last_data_ts: float | None = None
+        self._first_data_logged: bool = False
+        self._first_position_logged: bool = False
+        self._data_silence_warned: bool = False
+        self._data_timer = QTimer(self)
+        self._data_timer.setInterval(5000)
+        self._data_timer.timeout.connect(self._check_data_silence)
 
         # Статус-бар
         self.status_port = QLabel("Порт: нет")
@@ -238,6 +314,12 @@ class MainWindow(QMainWindow):
             self._worker = None
 
         self.logger.info("Подключение к порту %s", port)
+        self._last_data_ts = time.time()
+        self._first_data_logged = False
+        self._first_position_logged = False
+        self._data_silence_warned = False
+        self._data_timer.start()
+
         self._worker = SerialWorker(port, baud=115200, parent=self)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.position.connect(self._handle_position)
@@ -251,6 +333,7 @@ class MainWindow(QMainWindow):
 
     def _on_worker_finished(self):
         self.logger.info("SerialWorker завершён")
+        self._data_timer.stop()
         self.status_port.setText("Порт: отключён")
         self.status_port.setStyleSheet("color: gray;")
 
@@ -258,27 +341,50 @@ class MainWindow(QMainWindow):
         # Добавляем ts и сохраняем
         pos = dict(pos)
         pos["ts"] = time.time()
+        tracker_id = pos.get("id", "unknown")
+
+        lat = float(pos.get("lat", 0))
+        lon = float(pos.get("lon", 0))
+        alt = float(pos.get("altitude")) if "altitude" in pos else None
+        batt = float(pos.get("batt")) if "batt" in pos else None
+        voltage = float(pos.get("voltage")) if "voltage" in pos else None
+        sos = int(pos.get("sos", 0)) if "sos" in pos else None
+
         self.logger.info(
             "Позиция от %s: lat=%s lon=%s alt=%s batt=%s%%",
-            pos.get("id"),
-            pos.get("lat"),
-            pos.get("lon"),
-            pos.get("altitude", "—"),
-            pos.get("batt", "—"),
+            tracker_id,
+            lat,
+            lon,
+            alt if alt is not None else "—",
+            batt if batt is not None else "—",
         )
         try:
             self.repo.add_position(
-                tracker_id=pos.get("id", "unknown"),
-                lat=float(pos.get("lat", 0)),
-                lon=float(pos.get("lon", 0)),
-                alt=float(pos.get("altitude")) if "altitude" in pos else None,
-                batt=float(pos.get("batt")) if "batt" in pos else None,
-                voltage=float(pos.get("voltage")) if "voltage" in pos else None,
-                sos=int(pos.get("sos", 0)) if "sos" in pos else None,
+                tracker_id=tracker_id,
+                lat=lat,
+                lon=lon,
+                alt=alt,
+                batt=batt,
+                voltage=voltage,
+                sos=sos,
                 ts=pos["ts"],
             )
         except Exception:
             self.logger.exception("Ошибка сохранения позиции в БД")
+
+        # Обновляем RAM-кэш точек (10 минут для будущего трека)
+        cache = self._points_cache.setdefault(tracker_id, [])
+        cache.append((pos["ts"], lat, lon, alt))
+        cutoff = pos["ts"] - self._track_history_seconds
+        self._points_cache[tracker_id] = [p for p in cache if p[0] >= cutoff]
+
+        metrics = derive(self._points_cache[tracker_id])
+        pos.update(metrics)
+        pos["color"] = color_for_id(tracker_id)
+
+        if not self._first_position_logged:
+            self.logger.info("Получена первая позиция от %s", tracker_id)
+            self._first_position_logged = True
 
         self.tracker_panel.update_tracker(pos)
         self.bridge.pushPosition(pos)
@@ -294,10 +400,35 @@ class MainWindow(QMainWindow):
 
     def _handle_raw_line(self, line: str):
         self.logger.debug("RAW: %s", line)
+        self._last_data_ts = time.time()
+        self._data_silence_warned = False
+        if not self._first_data_logged:
+            self.logger.info("Данные с устройства на порту %s поступают", self._worker.port if self._worker else "?")
+            self._first_data_logged = True
+
+    def _check_data_silence(self):
+        if self._worker is None or not self._worker.isRunning():
+            return
+        if self._last_data_ts is None:
+            return
+        elapsed = time.time() - self._last_data_ts
+        if elapsed > 5.0 and not self._data_silence_warned:
+            self.logger.warning(
+                "С порта %s не поступают данные %.0f с",
+                self._worker.port,
+                elapsed,
+            )
+            self._data_silence_warned = True
 
     def _update_active_status(self):
         active = self.repo.active_trackers(max_age_s=300)
         self.status_active.setText(f"Активных: {len(active)}")
+
+    def _on_tracker_clicked(self, tracker_id: str):
+        self.web.page().runJavaScript(f'centerTracker("{tracker_id}")')
+
+    def _on_tracker_double_clicked(self, tracker_id: str):
+        self.web.page().runJavaScript(f'toggleTrack("{tracker_id}")')
 
     def closeEvent(self, event):
         self.logger.info("Закрытие приложения")

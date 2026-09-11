@@ -55,12 +55,11 @@ def scenario_circle(count, radius_m=200, speed_kmh=40, step_s=2):
     """Равномерное движение по окружности. Угол шага рассчитан из GS."""
     w = speed_kmh / 3.6  # м/с
     dang = (w * step_s) / radius_m
+    cos_lat = math.cos(math.radians(BASE_LAT))
     for i in range(count):
         ang = i * dang
-        lat = BASE_LAT + (radius_m / 111_320)
-        lon = BASE_LON + (radius_m / (111_320 * math.cos(BASE_LAT)))
         lat = BASE_LAT + radius_m / 111_320 * math.cos(ang)
-        lon = BASE_LON + radius_m / (111_320 * math.cos(BASE_LAT)) * math.sin(ang)
+        lon = BASE_LON + radius_m / (111_320 * cos_lat) * math.sin(ang)
         yield _fmt_block(i, lat, lon, CEN_ALT + 200)
 
 
