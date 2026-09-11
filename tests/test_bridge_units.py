@@ -97,3 +97,49 @@ def test_clear_history():
 
     assert repo.cleared is True
     assert spy.count == 1
+
+
+class FakeSettings:
+    def __init__(self, maps=None, active=None):
+        self._maps = maps or []
+        self.active_map_id = active
+
+    @property
+    def has_maps(self):
+        return bool(self._maps)
+
+    def default_map_id(self):
+        return self._maps[0]["id"] if self._maps else None
+
+    def get_map_path(self, map_id):
+        for m in self._maps:
+            if m["id"] == map_id:
+                return m["path"]
+        return None
+
+
+def test_get_min_max_zoom_without_settings():
+    bridge = WebBridge()
+    assert bridge.getMinZoom() == 9
+    assert bridge.getMaxZoom() == 15
+
+
+def test_get_min_max_zoom_with_missing_map(tmp_path):
+    cfg = FakeSettings(maps=[{"id": "x", "path": str(tmp_path / "missing.mbtiles")}], active="x")
+    bridge = WebBridge(settings=cfg)
+    assert bridge.getMinZoom() == 9
+    assert bridge.getMaxZoom() == 15
+
+
+def test_get_min_max_zoom_from_mbtiles(tmp_path):
+    from meshtrack.mapstore import MapStore
+
+    path = tmp_path / "test.mbtiles"
+    store = MapStore(path)
+    store.set_minmax_zoom(10, 14)
+    store.insert(10, 1, 1, b"tile")
+
+    cfg = FakeSettings(maps=[{"id": "test", "path": str(path)}], active="test")
+    bridge = WebBridge(settings=cfg)
+    assert bridge.getMinZoom() == 10
+    assert bridge.getMaxZoom() == 14

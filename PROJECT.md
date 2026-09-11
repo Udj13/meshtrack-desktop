@@ -188,7 +188,8 @@ Battery Level: 87%     # %
 
 | id map | Регион | S–N (lat) | W–E (lon) |
 |---|---|---|---|
-| `mordovia_lyambir` | Мордовия — аэродром Лямбирь / с. Напольная Тавла | 54.05–54.65 | 44.95–45.90 |
+| `lyambir_airfield` | Мордовия — аэродром Лямбирь (радиус 15 км) | 54.15263–54.42291 | 44.93453–45.39755 |
+| `napolnaya_tavla` | Мордовия — Напольная Тавла / Кочкурово / Семилей (радиус 15 км) | 53.88496–54.15524 | 45.17828–45.63832 |
 | `penza_sosnovka` | Пензенская обл. — аэродром Сосновка | 52.25–52.95 | 44.55–45.55 |
 | `lenoblast_nikolskoe` | Ленинградская обл. — аэродром Никольское | 59.30–59.85 | 29.60–30.70 |
 
@@ -261,7 +262,7 @@ pip install -r requirements.txt
 python -m meshtrack                 # запуск приложения
 pytest -q                           # тесты
 python tools/fake_serial.py --scenario climb --output /tmp/fake.txt
-python tools/download_region.py --region mordovia_lyambir --out ~/MeshTrack/maps/mordovia.mbtiles
+python tools/download_region.py --region lyambir_airfield --out ~/MeshTrack/maps/lyambir.mbtiles
 ```
 
 Git workflow: каждая фаза завершается `git commit` + `git push` (remote

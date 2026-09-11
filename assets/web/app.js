@@ -47,8 +47,49 @@ function colorForVario(vario) {
 
 const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
 
-// Фон пока серый; в Фазе 4 подключим offline MBTiles через map://
-L.tileLayer("", { attribution: "" }).addTo(map);
+let offlineLayer = null;
+let currentMapMinZoom = 2;
+let currentMapMaxZoom = 18;
+
+function applyMapZoomLimits(minZoom, maxZoom) {
+    currentMapMinZoom = minZoom;
+    currentMapMaxZoom = maxZoom;
+    map.setMinZoom(minZoom);
+    map.setMaxZoom(maxZoom);
+    console.log("Map zoom limits:", minZoom, "-", maxZoom);
+}
+
+function setOfflineMapLayer(mapId, minZoom, maxZoom) {
+    if (!mapId) {
+        console.warn("setOfflineMapLayer: empty mapId");
+        return;
+    }
+    const url = "map://" + mapId + "/{z}/{x}/{y}.png";
+    console.log("Switching offline map layer to:", url, "zoom", minZoom, "-", maxZoom);
+    if (offlineLayer) {
+        map.removeLayer(offlineLayer);
+    }
+    offlineLayer = L.tileLayer(url, {
+        attribution: "",
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        tileSize: 256
+    }).addTo(map);
+    applyMapZoomLimits(minZoom, maxZoom);
+}
+
+function loadMapWithZoom(mapId) {
+    if (!bridge) return;
+    bridge.getMinZoom(function(minZoom) {
+        bridge.getMaxZoom(function(maxZoom) {
+            minZoom = parseInt(minZoom) || 2;
+            maxZoom = parseInt(maxZoom) || 18;
+            setOfflineMapLayer(mapId, minZoom, maxZoom);
+        });
+    });
+}
+
+// Фон пока серый; слой установит bridge при подключении
 
 const markers = {};
 const arrows = {};
@@ -277,6 +318,20 @@ if (typeof qt !== "undefined") {
             if (bridge.getColorMode) {
                 bridge.getColorMode(function(mode) {
                     if (mode) trackColorMode = mode;
+                });
+            }
+            if (bridge.getActiveMapId) {
+                bridge.getActiveMapId(function(mapId) {
+                    console.log("Initial active map id:", mapId);
+                    if (mapId) loadMapWithZoom(mapId);
+                });
+            } else {
+                console.warn("bridge.getActiveMapId not available");
+            }
+            if (bridge.activeMapChanged) {
+                bridge.activeMapChanged.connect(function(mapId) {
+                    console.log("Active map changed:", mapId);
+                    if (mapId) loadMapWithZoom(mapId);
                 });
             }
             console.log("bridge connected");

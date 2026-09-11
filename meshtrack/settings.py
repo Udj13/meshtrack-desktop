@@ -13,6 +13,8 @@ from pathlib import Path
 DEFAULT_CONFIG = {
     "retention_days": 90,
     "track_color_mode": "palette",  # palette | altitude | vario
+    "maps": [],  # список dict{id, name, path}
+    "active_map_id": None,
 }
 
 VALID_COLOR_MODES = ("palette", "altitude", "vario")
@@ -57,6 +59,13 @@ class Settings:
             self._config["retention_days"] = 90
         if self._config.get("track_color_mode") not in VALID_COLOR_MODES:
             self._config["track_color_mode"] = "palette"
+        if not isinstance(self._config.get("maps"), list):
+            self._config["maps"] = []
+        # Убираем записи без обязательных полей
+        self._config["maps"] = [
+            m for m in self._config["maps"]
+            if isinstance(m, dict) and m.get("id") and m.get("path")
+        ]
 
     @property
     def retention_days(self) -> int:
@@ -75,6 +84,57 @@ class Settings:
         if value not in VALID_COLOR_MODES:
             value = "palette"
         self._config["track_color_mode"] = value
+
+    @property
+    def maps(self) -> list[dict]:
+        """Список карт [{id, name, path}]."""
+        return list(self._config.get("maps", []))
+
+    @property
+    def has_maps(self) -> bool:
+        """True, если в конфиге есть хотя бы одна карта."""
+        return len(self._config.get("maps", [])) > 0
+
+    @property
+    def active_map_id(self) -> str | None:
+        """Id активной карты или None."""
+        return self._config.get("active_map_id")
+
+    @active_map_id.setter
+    def active_map_id(self, value: str | None) -> None:
+        self._config["active_map_id"] = value
+
+    def default_map_id(self) -> str | None:
+        """Возвращает id первой доступной карты."""
+        maps = self._config.get("maps", [])
+        return maps[0]["id"] if maps else None
+
+    def get_map_path(self, map_id: str) -> str | None:
+        """Путь к MBTiles по id карты."""
+        for m in self._config.get("maps", []):
+            if m.get("id") == map_id:
+                return m.get("path")
+        return None
+
+    def add_map(self, map_id: str, name: str, path: str) -> None:
+        """Добавляет или обновляет карту."""
+        maps = self._config.get("maps", [])
+        for m in maps:
+            if m.get("id") == map_id:
+                m["name"] = name
+                m["path"] = path
+                return
+        maps.append({"id": map_id, "name": name, "path": path})
+        self._config["maps"] = maps
+
+    def remove_map(self, map_id: str) -> bool:
+        """Удаляет карту из конфига. Возвращает True если была удалена."""
+        before = self._config.get("maps", [])
+        after = [m for m in before if m.get("id") != map_id]
+        self._config["maps"] = after
+        if self._config.get("active_map_id") == map_id:
+            self._config["active_map_id"] = self.default_map_id()
+        return len(after) < len(before)
 
     def as_dict(self) -> dict:
         """Возвращает копию текущей конфигурации."""

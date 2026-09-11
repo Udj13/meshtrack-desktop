@@ -19,6 +19,9 @@ class WebBridge(QObject):
     # Сигнализирует, что история позиций была очищена.
     historyCleared = Signal()
 
+    # Сигнализирует о смене активной карты (id для map://).
+    activeMapChanged = Signal(str)
+
     def __init__(self, repo=None, settings=None, parent=None):
         super().__init__(parent)
         self._repo = repo
@@ -50,6 +53,46 @@ class WebBridge(QObject):
         if self._settings is None:
             return "palette"
         return self._settings.track_color_mode
+
+    @Slot(result=str)
+    def getActiveMapId(self) -> str:
+        """Id активной карты для URL map://{id}/{z}/{x}/{y}.png."""
+        if self._settings is None:
+            return ""
+        return self._settings.active_map_id or self._settings.default_map_id() or ""
+
+    @Slot(str)
+    def setActiveMapId(self, map_id: str):
+        """Устанавливает активную карту и уведомляет JS."""
+        if self._settings is not None:
+            self._settings.active_map_id = map_id
+        self.activeMapChanged.emit(map_id)
+
+    @Slot(result=int)
+    def getMinZoom(self) -> int:
+        """Минимальный zoom активной карты."""
+        return self._map_zoom_range()[0]
+
+    @Slot(result=int)
+    def getMaxZoom(self) -> int:
+        """Максимальный zoom активной карты."""
+        return self._map_zoom_range()[1]
+
+    def _map_zoom_range(self) -> tuple[int, int]:
+        if self._settings is None:
+            return 9, 15
+        map_id = self._settings.active_map_id or self._settings.default_map_id()
+        if not map_id:
+            return 9, 15
+        path = self._settings.get_map_path(map_id)
+        if not path:
+            return 9, 15
+        try:
+            from .mapstore import MapStore
+            store = MapStore(path)
+            return store.get_minmax_zoom()
+        except Exception:
+            return 9, 15
 
     @Slot()
     def clearHistory(self):

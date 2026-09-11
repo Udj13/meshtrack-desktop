@@ -37,3 +37,30 @@ def test_invalid_retention_normalized(tmp_path: Path):
     path.write_text(json.dumps({"retention_days": "abc"}), encoding="utf-8")
     cfg = Settings(path)
     assert cfg.retention_days == 90
+
+
+def test_maps_roundtrip(tmp_path: Path):
+    path = tmp_path / "config.json"
+    cfg = Settings(path)
+    assert cfg.has_maps is False
+    assert cfg.default_map_id() is None
+
+    cfg.add_map("mordovia", "Мордовия", "/tmp/mordovia.mbtiles")
+    assert cfg.has_maps is True
+    assert cfg.default_map_id() == "mordovia"
+    assert cfg.get_map_path("mordovia") == "/tmp/mordovia.mbtiles"
+    cfg.save()
+
+    cfg2 = Settings(path)
+    assert cfg2.default_map_id() == "mordovia"
+    assert cfg2.get_map_path("mordovia") == "/tmp/mordovia.mbtiles"
+
+
+def test_remove_map(tmp_path: Path):
+    cfg = Settings(tmp_path / "c.json")
+    cfg.add_map("a", "A", "/a.mbtiles")
+    cfg.add_map("b", "B", "/b.mbtiles")
+    cfg.active_map_id = "b"
+    assert cfg.remove_map("a") is True
+    assert cfg.default_map_id() == "b"
+    assert cfg.remove_map("a") is False

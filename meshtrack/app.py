@@ -35,7 +35,9 @@ from PySide6.QtWidgets import (
 )
 
 from .derivation import derive
+from .first_run_wizard import run_download_map_wizard
 from .logutil import QtLogHandler, setup_logging
+from .mapscheme import install_map_handler
 from .repository import Repository
 from .serial_worker import SerialWorker
 from .settings import Settings
@@ -198,11 +200,11 @@ class MainWindow(QMainWindow):
         self.resize(1400, 850)
 
         # Данные
-        data_dir = app_data_dir()
-        data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir = app_data_dir()
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # Настройки
-        self.settings = Settings(data_dir / "config.json")
+        self.settings = Settings(self.data_dir / "config.json")
         try:
             self.settings.save()
         except Exception:
@@ -210,12 +212,12 @@ class MainWindow(QMainWindow):
 
         # Логирование
         log_level = logging.DEBUG if debug else logging.INFO
-        self.logger = setup_logging(data_dir / "meshtrack.log", level=log_level)
+        self.logger = setup_logging(self.data_dir / "meshtrack.log", level=log_level)
         self.qt_log_handler = QtLogHandler(self)
         self.logger.addHandler(self.qt_log_handler)
 
-        self.repo = Repository(str(data_dir / "meshtrack.db"))
-        self.logger.info("База данных: %s", data_dir / "meshtrack.db")
+        self.repo = Repository(str(self.data_dir / "meshtrack.db"))
+        self.logger.info("База данных: %s", self.data_dir / "meshtrack.db")
 
         # Очистка истории по retention_days
         try:
@@ -237,6 +239,11 @@ class MainWindow(QMainWindow):
         # Web view
         self.web = QWebEngineView()
         self.splitter.addWidget(self.web)
+
+        # Кастомная схема map:// для офлайн-тайлов
+        self._map_handler = install_map_handler(
+            self.web.page().profile(), self.settings, parent=self
+        )
 
         # Панель трекеров
         self.tracker_panel = TrackerPanel()
@@ -289,6 +296,7 @@ class MainWindow(QMainWindow):
         self.status_port = QLabel("Порт: нет")
         self.status_queue = QLabel("Queue: —")
         self.status_active = QLabel("Активных: 0")
+        self.status_map = QLabel("Карта: —")
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(180)
         self.port_combo.activated.connect(self._on_port_selected)
@@ -296,11 +304,17 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(self.status_port)
         self.statusBar().addWidget(self.status_queue)
         self.statusBar().addWidget(self.status_active)
+        self.statusBar().addWidget(self.status_map)
         self.statusBar().addWidget(QWidget(), 1)  # spacer
         self.statusBar().addWidget(self.port_combo)
 
+        self._update_map_status()
+
         # Toolbar: фильтры истории и цвет треков
         self._setup_toolbar()
+
+        # Меню
+        self._setup_menu()
 
         # Dock-виджет с логом
         self.log_dock = QDockWidget("Лог", self)
@@ -353,6 +367,31 @@ class MainWindow(QMainWindow):
 
         # Начальное значение фильтра — сегодня
         self._apply_filter_range(0)
+
+    def _setup_menu(self):
+        """Главное меню приложения."""
+        menu_bar = self.menuBar()
+        map_menu = menu_bar.addMenu("Карта")
+
+        download_action = menu_bar.addAction("Загрузить новую карту…")
+        download_action.setStatusTip("Скачать дополнительный регион для офлайн-карт")
+        download_action.triggered.connect(self._on_download_map)
+        map_menu.addAction(download_action)
+
+    def _on_download_map(self):
+        """Открывает wizard для докачки карты."""
+        ok = run_download_map_wizard(self.settings, self.data_dir / "maps", parent=self)
+        if not ok:
+            return
+        map_id = self.settings.active_map_id
+        if map_id:
+            try:
+                self.settings.save()
+                self.logger.info("Активная карта: %s", map_id)
+                self._update_map_status()
+                self.bridge.setActiveMapId(map_id)
+            except Exception:
+                self.logger.exception("Ошибка сохранения настроек карты")
 
     def _on_filter_changed(self, index: int):
         self._apply_filter_range(index)
@@ -588,6 +627,17 @@ class MainWindow(QMainWindow):
     def _update_active_status(self):
         active = self.repo.active_trackers(max_age_s=300)
         self.status_active.setText(f"Активных: {len(active)}")
+
+    def _update_map_status(self):
+        map_id = self.settings.active_map_id
+        if not map_id:
+            self.status_map.setText("Карта: нет")
+            return
+        path = self.settings.get_map_path(map_id)
+        if not path or not Path(path).exists():
+            self.status_map.setText(f"Карта: {map_id} (файл не найден)")
+            return
+        self.status_map.setText(f"Карта: {map_id}")
 
     def _on_tracker_clicked(self, tracker_id: str):
         self.web.page().runJavaScript(f'centerTracker("{tracker_id}")')
