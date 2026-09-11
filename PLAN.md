@@ -12,7 +12,8 @@
 |---|---|---|
 | 0 | Скелет: parser, fake_serial, env, Qt-окно | ✅ |
 | 1 | Живые маркеры: serial-QThread → repo → bridge → Leaflet | ✅ |
-| 2 | Вектор GS/курс/варио + панель трекеров | 🔄 |
+| 1.1 | Логирование (файл + виджет) и правая панель трекеров | ✅ |
+| 2 | Вектор GS/курс/варио + интеграция панели трекеров | 🔄 |
 | 3 | История и треки, фильтры по дате | ⛶ |
 | 4 | Карты: first-run мастер, downloader, MBTiles, map:// | ⛶ |
 | 5 | Traccar-опция, настройки, экспорт GPX/CSV | ⛶ |
@@ -71,11 +72,16 @@
 - `meshtrack/webbridge.py` — QObject:
   `positionReceived(dict)` — Python сторона; `pushPosition` — JS-invokable
   через `QWebChannel` (`webChannel.js` локально в assets)
+- `meshtrack/logutil.py` — настройка логирования в файл + `QtLogHandler` для
+  вывода в dock-виджет окна
+- `meshtrack/app.py`: `TrackerPanel` (правая панель со списком трекеров) и
+  `QDockWidget` «Лог»
 - `assets/web/index.html`, `app.js`, локальная копия `leaflet.js/css`
   (скачивается один раз, фиксируется в репо)
 - UI: маркер = circle (radius 7, цвет из palette по hash(id)), popup c полями;
   авто-подключение если доступен ровно 1 serial-порт (иначе — комбобокс в
-  статус-баре)
+  статус-баре); правая панель отображает ID, высоту, заряд, напряжение и
+  время последнего обновления
 
 **Проверки:**
 1. `pytest -q tests/test_repository.py tests/test_bridge_units.py` (без GUI;
@@ -103,9 +109,9 @@
 - `webbridge.positionReceived` расширяется полями gs/course/vario/trend
 - `app.js`: стрелка курса = divIcon с rotate(course), length∝GS (1 px/(kmh)),
   vario chip внутри маркера (↗/↘/—), popup показывает GS, alt MSL, vario
-- Правая панель `TrackerListPane` (QListWidget по tracker’ам): элемент — цвет
-  chip, id, GS→, alt, trend, заряд, last-update «N c»; сорт по свёжести;
-  click → `js: map.setView(marker)`, double-click → трек toggle
+- Дополнить правую панель `TrackerPanel` (уже создана в фазе 1.1): GS, курс,
+  варио; сортировка по свежести; click → `js: map.setView(marker)`,
+  double-click → toggle трека
 
 **Проверки:**
 1. Unit-derive (no GUI):

@@ -85,7 +85,8 @@
 | `meshtrack/downloader.py` | Скачивание тайлов по bbox/zooms с rate-limit, resume, прогрессом. |
 | `meshtrack/regions.py` | Встроенные регионы (bbox по трём аэродромам), пользовательские bbox. |
 | `meshtrack/webbridge.py` | QObject-мост Python↔JS (QWebChannel): positions, tracks, config. |
-| `meshtrack/app.py` | MainWindow: карта + панель трекеров, перв-запуск-мастер, настройки. |
+| `meshtrack/app.py` | MainWindow: карта + панель трекеров, статус-бар, dock-виджет лога. |
+| `meshtrack/logutil.py` | Настройка логирования: файл в `app_data_dir` + `QtLogHandler` для UI. |
 | `meshtrack/settings.py` | `config.json`: traccar_on, слои, palette, retention, serial prefs. |
 | `tools/fake_serial.py` | Генератор сценариев для тестов (см. §10). |
 | `tools/download_region.py` | CLI скачивания области → MBTiles. |

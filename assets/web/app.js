@@ -19,7 +19,7 @@ function formatAge(tsSec) {
     return Math.floor(dt / 60) + " мин";
 }
 
-const map = L.map("map").setView([54.4, 45.4], 13);
+const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
 
 // Фон пока серый; в Фазе 4 подключим offline MBTiles через map://
 L.tileLayer("", { attribution: "" }).addTo(map);
