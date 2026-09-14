@@ -39,6 +39,40 @@ def test_invalid_retention_normalized(tmp_path: Path):
     assert cfg.retention_days == 90
 
 
+def test_phase5_defaults(tmp_path: Path):
+    cfg = Settings(tmp_path / "nonexistent.json")
+    assert cfg.traccar_on is False
+    assert cfg.port_pref == ""
+    assert cfg.baud == 115200
+    assert cfg.exports_dir == ""
+
+
+def test_phase5_roundtrip(tmp_path: Path):
+    path = tmp_path / "config.json"
+    cfg = Settings(path)
+    cfg.traccar_on = True
+    cfg.port_pref = "/dev/tty.usbserial"
+    cfg.baud = 57600
+    cfg.exports_dir = "/tmp/exports"
+    cfg.save()
+
+    cfg2 = Settings(path)
+    assert cfg2.traccar_on is True
+    assert cfg2.port_pref == "/dev/tty.usbserial"
+    assert cfg2.baud == 57600
+    assert cfg2.exports_dir == "/tmp/exports"
+
+
+def test_phase5_invalid_baud_normalized(tmp_path: Path):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({"baud": "abc", "traccar_on": 1, "port_pref": 5}),
+                    encoding="utf-8")
+    cfg = Settings(path)
+    assert cfg.baud == 115200
+    assert cfg.traccar_on is True
+    assert cfg.port_pref == ""
+
+
 def test_maps_roundtrip(tmp_path: Path):
     path = tmp_path / "config.json"
     cfg = Settings(path)

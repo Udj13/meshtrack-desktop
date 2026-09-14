@@ -1,6 +1,7 @@
 """Главное окно приложения MeshTrack.
 
 Фаза 1: карта на QtWebEngine + WebChannel + SerialWorker + Repository.
+Фаза 5: диалог настроек (Traccar, serial, retention), экспорт GPX/CSV.
 """
 import logging
 import os
@@ -15,17 +16,23 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDateTimeEdit,
     QDialog,
     QDialogButtonBox,
     QDockWidget,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -35,9 +42,11 @@ from PySide6.QtWidgets import (
 )
 
 from .derivation import derive
+from .exporter import collect_tracks, export_csv, export_gpx
 from .first_run_wizard import run_download_map_wizard
 from .logutil import QtLogHandler, setup_logging
 from .mapscheme import install_map_handler
+from .publisher import TraccarPublisher
 from .repository import Repository
 from .serial_worker import SerialWorker
 from .settings import Settings
@@ -58,6 +67,8 @@ PALETTE = [
     "#808000",
     "#9a6324",
 ]
+
+BAUD_CHOICES = ["9600", "19200", "38400", "57600", "115200", "230400"]
 
 
 def color_for_id(tracker_id: str) -> str:
@@ -193,6 +204,107 @@ class TrackerPanel(QWidget):
             self.trackerDoubleClicked.emit(self._row_ids[row])
 
 
+class SettingsDialog(QDialog):
+    """Диалог настроек: Traccar, serial-порт/baud, retention, экспорт.
+
+    Кнопки экспорта вызывают `export_cb("gpx"|"csv")` — обработчик живёт в
+    MainWindow (там есть repo и текущий фильтр истории).
+    """
+
+    def __init__(self, settings: Settings, export_cb, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Настройки")
+        self.setMinimumWidth(460)
+
+        layout = QVBoxLayout(self)
+
+        # --- Traccar ---
+        traccar_box = QGroupBox("Traccar (опция)")
+        traccar_layout = QVBoxLayout(traccar_box)
+        self.traccar_check = QCheckBox("Отправлять позиции на free-gps.ru:5055")
+        self.traccar_check.setChecked(settings.traccar_on)
+        traccar_layout.addWidget(self.traccar_check)
+        traccar_hint = QLabel("По умолчанию выключено; при включении нужен интернет.")
+        traccar_hint.setEnabled(False)
+        traccar_layout.addWidget(traccar_hint)
+        layout.addWidget(traccar_box)
+
+        # --- Serial ---
+        serial_box = QGroupBox("Приёмник (serial)")
+        serial_form = QFormLayout(serial_box)
+
+        self.port_combo = QComboBox()
+        self.port_combo.setEditable(True)
+        ports = self._detect_ports()
+        current_port = settings.port_pref
+        if current_port and current_port not in ports:
+            self.port_combo.addItem(current_port)
+        self.port_combo.addItems(ports)
+        if current_port:
+            self.port_combo.setCurrentText(current_port)
+
+        self.baud_combo = QComboBox()
+        self.baud_combo.setEditable(True)
+        self.baud_combo.addItems(BAUD_CHOICES)
+        self.baud_combo.setCurrentText(str(settings.baud))
+
+        serial_form.addRow("Порт:", self.port_combo)
+        serial_form.addRow("Baud:", self.baud_combo)
+        layout.addWidget(serial_box)
+
+        # --- Данные ---
+        data_box = QGroupBox("Данные")
+        data_form = QFormLayout(data_box)
+
+        self.retention_spin = QSpinBox()
+        self.retention_spin.setRange(1, 3650)
+        self.retention_spin.setSuffix(" дн.")
+        self.retention_spin.setValue(max(1, settings.retention_days))
+        data_form.addRow("Хранить историю:", self.retention_spin)
+
+        export_row = QHBoxLayout()
+        gpx_btn = QPushButton("Экспорт GPX…")
+        csv_btn = QPushButton("Экспорт CSV…")
+        gpx_btn.setToolTip("Все трекеры за период текущего фильтра истории")
+        csv_btn.setToolTip("Все трекеры за период текущего фильтра истории")
+        gpx_btn.clicked.connect(lambda: export_cb("gpx"))
+        csv_btn.clicked.connect(lambda: export_cb("csv"))
+        export_row.addWidget(gpx_btn)
+        export_row.addWidget(csv_btn)
+        export_row.addStretch(1)
+        data_form.addRow("Экспорт треков:", export_row)
+        layout.addWidget(data_box)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @staticmethod
+    def _detect_ports() -> list[str]:
+        try:
+            import serial.tools.list_ports
+            return [p.device for p in serial.tools.list_ports.comports()]
+        except Exception:
+            return []
+
+    def values(self) -> dict:
+        """Возвращает введённые значения для применения в MainWindow."""
+        baud = 115200
+        try:
+            baud_value = int(self.baud_combo.currentText().strip())
+            if baud_value > 0:
+                baud = baud_value
+        except ValueError:
+            pass
+        return {
+            "traccar_on": self.traccar_check.isChecked(),
+            "port_pref": self.port_combo.currentText().strip(),
+            "baud": baud,
+            "retention_days": self.retention_spin.value(),
+        }
+
+
 class MainWindow(QMainWindow):
     def __init__(self, debug: bool = False):
         super().__init__()
@@ -218,6 +330,11 @@ class MainWindow(QMainWindow):
 
         self.repo = Repository(str(self.data_dir / "meshtrack.db"))
         self.logger.info("База данных: %s", self.data_dir / "meshtrack.db")
+
+        # Traccar (опция, по умолчанию выключена — enqueue будет no-op)
+        self.publisher = TraccarPublisher(
+            enable=self.settings.traccar_on, logger=self.logger
+        )
 
         # Очистка истории по retention_days
         try:
@@ -371,12 +488,117 @@ class MainWindow(QMainWindow):
     def _setup_menu(self):
         """Главное меню приложения."""
         menu_bar = self.menuBar()
-        map_menu = menu_bar.addMenu("Карта")
 
-        download_action = menu_bar.addAction("Загрузить новую карту…")
+        map_menu = menu_bar.addMenu("Карта")
+        download_action = map_menu.addAction("Загрузить новую карту…")
         download_action.setStatusTip("Скачать дополнительный регион для офлайн-карт")
         download_action.triggered.connect(self._on_download_map)
-        map_menu.addAction(download_action)
+
+        data_menu = menu_bar.addMenu("Данные")
+        gpx_action = data_menu.addAction("Экспорт GPX…")
+        gpx_action.triggered.connect(lambda: self._export_tracks("gpx"))
+        csv_action = data_menu.addAction("Экспорт CSV…")
+        csv_action.triggered.connect(lambda: self._export_tracks("csv"))
+
+        settings_action = menu_bar.addAction("Настройки…")
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._open_settings)
+
+    def _open_settings(self):
+        """Диалог настроек: Traccar, serial, retention, экспорт."""
+        dlg = SettingsDialog(
+            self.settings,
+            lambda fmt: self._export_tracks(fmt, parent=dlg),
+            self,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        values = dlg.values()
+        old_port = self.settings.port_pref
+        old_baud = self.settings.baud
+        retention_changed = values["retention_days"] != self.settings.retention_days
+
+        self.settings.traccar_on = values["traccar_on"]
+        self.settings.port_pref = values["port_pref"]
+        self.settings.baud = values["baud"]
+        self.settings.retention_days = values["retention_days"]
+        try:
+            self.settings.save()
+        except Exception:
+            self.logger.exception("Ошибка сохранения настроек")
+
+        self.publisher.enable = self.settings.traccar_on
+        self.logger.info(
+            "Настройки: Traccar=%s, порт=%s, baud=%d, retention=%d дн.",
+            "вкл" if self.settings.traccar_on else "выкл",
+            self.settings.port_pref or "—",
+            self.settings.baud,
+            self.settings.retention_days,
+        )
+
+        if retention_changed:
+            try:
+                purged = self.repo.purge_old(self.settings.retention_days)
+                if purged:
+                    self.logger.info("Удалено старых позиций: %d", purged)
+            except Exception:
+                self.logger.exception("Ошибка очистки старой истории")
+
+        port_changed = self.settings.port_pref != old_port
+        baud_changed = self.settings.baud != old_baud
+        if self._worker is not None and (port_changed or baud_changed):
+            if self.settings.port_pref:
+                self.logger.info("Переподключение к %s", self.settings.port_pref)
+                self._connect_serial(self.settings.port_pref)
+
+    def _export_tracks(self, fmt: str, parent=None):
+        """Экспорт всех трекеров за текущий фильтр истории в GPX/CSV."""
+        parent = parent or self
+        ts_from = self._track_ts_from or None
+        ts_to = self._track_ts_to or None
+        try:
+            tracks = collect_tracks(self.repo, ts_from=ts_from, ts_to=ts_to)
+        except Exception:
+            self.logger.exception("Ошибка выборки треков для экспорта")
+            QMessageBox.critical(parent, "Экспорт", "Не удалось прочитать историю.")
+            return
+
+        total = sum(len(points) for points in tracks.values())
+        if total == 0:
+            QMessageBox.information(parent, "Экспорт", "За выбранный период нет данных.")
+            return
+
+        ext = fmt if fmt in ("gpx", "csv") else "gpx"
+        start_dir = self.settings.exports_dir or str(self.data_dir)
+        default_name = time.strftime("meshtrack_%Y%m%d_%H%M.") + ext
+        file_filter = "GPX (*.gpx)" if ext == "gpx" else "CSV (*.csv)"
+        path, _ = QFileDialog.getSaveFileName(
+            parent, "Экспорт треков", str(Path(start_dir) / default_name), file_filter
+        )
+        if not path:
+            return
+        if not path.lower().endswith("." + ext):
+            path += "." + ext
+
+        try:
+            if ext == "gpx":
+                count = export_gpx(path, tracks)
+            else:
+                count = export_csv(path, tracks)
+        except Exception:
+            self.logger.exception("Ошибка экспорта %s", path)
+            QMessageBox.critical(parent, "Экспорт", "Не удалось сохранить файл.")
+            return
+
+        self.settings.exports_dir = str(Path(path).parent)
+        try:
+            self.settings.save()
+        except Exception:
+            self.logger.exception("Ошибка сохранения настроек")
+        self.logger.info(
+            "Экспортировано %s: %s (%d точек)", ext.upper(), path, count
+        )
 
     def _on_download_map(self):
         """Открывает wizard для докачки карты."""
@@ -473,7 +695,6 @@ class MainWindow(QMainWindow):
         self.web.page().runJavaScript("refreshVisibleTracks()")
 
     def _on_clear_history(self):
-        from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             self,
             "Очистить историю",
@@ -503,13 +724,25 @@ class MainWindow(QMainWindow):
         for p in ports:
             self.port_combo.addItem(p)
 
-        if len(ports) == 1:
+        # Автоподключение: сохранённый port_pref, иначе единственный порт
+        pref = self.settings.port_pref
+        if pref and pref in ports:
+            index = self.port_combo.findText(pref)
+            if index > 0:
+                self.port_combo.setCurrentIndex(index)
+            self._connect_serial(pref)
+        elif len(ports) == 1:
             self._connect_serial(ports[0])
 
     def _on_port_selected(self, index: int):
         if index <= 0:
             return
         port = self.port_combo.itemText(index)
+        self.settings.port_pref = port
+        try:
+            self.settings.save()
+        except Exception:
+            self.logger.exception("Ошибка сохранения настроек")
         self._connect_serial(port)
 
     def _connect_serial(self, port: str):
@@ -517,14 +750,15 @@ class MainWindow(QMainWindow):
             self._worker.stop()
             self._worker = None
 
-        self.logger.info("Подключение к порту %s", port)
+        baud = self.settings.baud
+        self.logger.info("Подключение к порту %s (baud=%d)", port, baud)
         self._last_data_ts = time.time()
         self._first_data_logged = False
         self._first_position_logged = False
         self._data_silence_warned = False
         self._data_timer.start()
 
-        self._worker = SerialWorker(port, baud=115200, parent=self)
+        self._worker = SerialWorker(port, baud=baud, parent=self)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.position.connect(self._handle_position)
         self._worker.queue_size.connect(self._handle_queue_size)
@@ -592,6 +826,7 @@ class MainWindow(QMainWindow):
 
         self.tracker_panel.update_tracker(pos)
         self.bridge.pushPosition(pos)
+        self.publisher.enqueue(pos)
         self._update_active_status()
 
     def _handle_queue_size(self, size: int):
@@ -649,6 +884,8 @@ class MainWindow(QMainWindow):
         self.logger.info("Закрытие приложения")
         if self._worker is not None:
             self._worker.stop()
+        self.publisher.flush(timeout=1.0)
+        self.publisher.stop()
         event.accept()
 
 

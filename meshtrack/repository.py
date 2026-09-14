@@ -152,7 +152,7 @@ class Repository:
     ) -> list[dict]:
         """Возвращает точки трека за период, редуцированные до limit.
 
-        Формат элемента: {"ts": float, "lat": float, "lon": float, "alt": float|None}.
+        Формат элемента: {"ts", "lat", "lon", "alt", "batt", "voltage", "sos"}.
         """
         where = ["tracker_id = ?"]
         params: list = [tracker_id]
@@ -163,14 +163,22 @@ class Repository:
             where.append("ts <= ?")
             params.append(ts_to)
 
-        sql = f"""SELECT ts, lat, lon, alt FROM positions
+        sql = f"""SELECT ts, lat, lon, alt, batt, voltage, sos FROM positions
                   WHERE {' AND '.join(where)}
                   ORDER BY ts ASC"""
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
 
         pts = [
-            {"ts": r["ts"], "lat": r["lat"], "lon": r["lon"], "alt": r["alt"]}
+            {
+                "ts": r["ts"],
+                "lat": r["lat"],
+                "lon": r["lon"],
+                "alt": r["alt"],
+                "batt": r["batt"],
+                "voltage": r["voltage"],
+                "sos": r["sos"],
+            }
             for r in rows
         ]
         return decimate_points(pts, limit)

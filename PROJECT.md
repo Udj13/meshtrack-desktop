@@ -26,7 +26,7 @@
 
 ## 2. Легаси-источник
 
-Исходник `main.py` (консольный монитор): чтение serial (115200 baud), сборка
+Исходник `main.py` (консольный монитор; удалён из репо в Фазе 5): чтение serial (115200 baud), сборка
 текстовых блоков между маркерами `Radio Received packet!` …
 `Postfix: OK` / `Received valid LoRa data packet!`, парсинг regex’ами,
 опциональная отправка на Traccar (free-gps.ru:5055). Парсер переносится в
@@ -85,7 +85,9 @@
 | `meshtrack/downloader.py` | Скачивание тайлов по bbox/zooms с rate-limit, resume, прогрессом. |
 | `meshtrack/regions.py` | Встроенные регионы (bbox по трём аэродромам), пользовательские bbox. |
 | `meshtrack/webbridge.py` | QObject-мост Python↔JS (QWebChannel): positions, tracks, config. |
-| `meshtrack/app.py` | MainWindow: карта + панель трекеров, статус-бар, dock-виджет лога. |
+| `meshtrack/publisher.py` | TraccarPublisher: очередь + retry; при `enable=False` — no-op (см. §11). |
+| `meshtrack/exporter.py` | Экспорт треков за период в GPX/CSV (чистые функции, без Qt). |
+| `meshtrack/app.py` | MainWindow: карта + панель трекеров, статус-бар, dock-виджет лога, диалог настроек. |
 | `meshtrack/logutil.py` | Настройка логирования: файл в `app_data_dir` + `QtLogHandler` для UI. |
 | `meshtrack/settings.py` | `config.json`: traccar_on, слои, palette, retention, serial prefs. |
 | `tools/fake_serial.py` | Генератор сценариев для тестов (см. §10). |
@@ -97,7 +99,6 @@
 MeshTrack desktop/
 ├─ PROJECT.md            # этот файл
 ├─ PLAN.md               # фазы и критерии
-├─ main.py               # легаси (источник парсера; удаляется в Фазе 5)
 ├─ requirements.txt
 ├─ .gitignore
 ├─ .venv/                # локальное окружение (git-ignored)
@@ -131,6 +132,10 @@ MeshTrack desktop/
 - **Фильтр истории:** «Сегодня / Вчера / Период…» (QDateTimeEdit-диалог).
 - **Статус-бар:** порт (зелёный = подключён) • очередь из легаси (если есть
   в потоке) • активных трекеров • зона загрузки карты (для мастера).
+- **Диалог «Настройки»:** тумблер Traccar, порт/baud (из `list_ports`),
+  retention_days, «Экспорт GPX/CSV» (все трекеры за текущий фильтр истории,
+  через `QFileDialog`). При старте приложение подключается к `port_pref`,
+  если порт доступен, иначе — к единственному присутствующему.
 
 **Палитра (12 цветов, детерминированно по id):** `#e6194b #3cb44b #ffe119
 #4363d8 #f58231 #911eb4 #46f0f0 #f032e6 #bfef45 #3cb44b #808000 #9a6324`
@@ -235,10 +240,11 @@ PySide-less pipeline): выдаёт легаси-текст на stdout-файл
 
 - Тумблер в Настройках «Отправлять на Traccar (free-gps.ru)», **off by
   default**.
-- При on: очередь + retry (5 failed → пауза 5 мин), endpoint
-  `http://free-gps.ru:5055`, payload как в легаси (id, lat, lon, alt, ts, sos,
-  voltage, batt, ttl=3).
-- Выключен → `send()` не вызывается (проверяется в тесте Фазы 5).
+- При on: очередь + retry (5 failed → пауза 5 мин, payload возвращается в
+  очередь), endpoint фиксированный `http://free-gps.ru:5055`, payload как в
+  легаси (id, lat, lon, altitude, timestamp ISO, sos, voltage, batt, ttl=3);
+  отправка в фоновом потоке (`threading`), интерфейс не блокируется.
+- Выключен → `enqueue()` — no-op, ни одного сетевого запроса (тест Фазы 5).
 
 ## 12. Сборка и дистрибуция
 

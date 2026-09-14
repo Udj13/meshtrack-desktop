@@ -15,6 +15,10 @@ DEFAULT_CONFIG = {
     "track_color_mode": "palette",  # palette | altitude | vario
     "maps": [],  # список dict{id, name, path}
     "active_map_id": None,
+    "traccar_on": False,
+    "port_pref": "",
+    "baud": 115200,
+    "exports_dir": "",
 }
 
 VALID_COLOR_MODES = ("palette", "altitude", "vario")
@@ -59,6 +63,16 @@ class Settings:
             self._config["retention_days"] = 90
         if self._config.get("track_color_mode") not in VALID_COLOR_MODES:
             self._config["track_color_mode"] = "palette"
+        self._config["traccar_on"] = bool(self._config.get("traccar_on", False))
+        if not isinstance(self._config.get("port_pref"), str):
+            self._config["port_pref"] = ""
+        if not isinstance(self._config.get("exports_dir"), str):
+            self._config["exports_dir"] = ""
+        try:
+            baud = int(self._config.get("baud", 115200))
+        except (TypeError, ValueError):
+            baud = 115200
+        self._config["baud"] = baud if baud > 0 else 115200
         if not isinstance(self._config.get("maps"), list):
             self._config["maps"] = []
         # Убираем записи без обязательных полей
@@ -84,6 +98,49 @@ class Settings:
         if value not in VALID_COLOR_MODES:
             value = "palette"
         self._config["track_color_mode"] = value
+
+    @property
+    def traccar_on(self) -> bool:
+        """Отправлять ли позиции на Traccar (по умолчанию False)."""
+        return bool(self._config.get("traccar_on", False))
+
+    @traccar_on.setter
+    def traccar_on(self, value: bool) -> None:
+        self._config["traccar_on"] = bool(value)
+
+    @property
+    def port_pref(self) -> str:
+        """Предпочитаемый serial-порт ('' если не задан)."""
+        return self._config.get("port_pref", "")
+
+    @port_pref.setter
+    def port_pref(self, value: str) -> None:
+        self._config["port_pref"] = str(value or "")
+
+    @property
+    def baud(self) -> int:
+        """Скорость serial-порта."""
+        try:
+            return int(self._config.get("baud", 115200))
+        except (TypeError, ValueError):
+            return 115200
+
+    @baud.setter
+    def baud(self, value: int) -> None:
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = 115200
+        self._config["baud"] = value if value > 0 else 115200
+
+    @property
+    def exports_dir(self) -> str:
+        """Последняя папка экспорта ('' если не задана)."""
+        return self._config.get("exports_dir", "")
+
+    @exports_dir.setter
+    def exports_dir(self, value: str) -> None:
+        self._config["exports_dir"] = str(value or "")
 
     @property
     def maps(self) -> list[dict]:

@@ -16,7 +16,7 @@
 | 2 | Вектор GS/курс/варио + интеграция панели трекеров | ✅ |
 | 3 | История и треки, фильтры по дате | ✅ |
 | 4 | Карты: first-run мастер, downloader, MBTiles, map:// | ✅ |
-| 5 | Traccar-опция, настройки, экспорт GPX/CSV | ⛶ |
+| 5 | Traccar-опция, настройки, экспорт GPX/CSV | ✅ |
 | 6 | Сборка: PyInstaller, Inno (Win), DMG (macOS) | ⛶ |
 | 7 | (Опц.) Импорт Ozi `.map + .png/.jpg` → MBTiles | ⛶ |
 
