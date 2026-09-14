@@ -138,7 +138,7 @@ function updateMarker(pos) {
         : "";
     const popupHtml = `
         <b>${id}</b><br>
-        GS: ${gs !== null ? gs + " км/ч" : "—"}<br>
+        Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
         Курс: ${course !== null ? course + "°" : "—"}<br>
         Высота: ${alt} м<br>
         Варио: ${vario !== null ? vario + " м/с " + trend : "—"}<br>

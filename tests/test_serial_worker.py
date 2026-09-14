@@ -50,6 +50,7 @@ def test_serial_worker_reads_file(fake_blocks_file):
     assert positions[0]["id"] == "boon1"
     assert positions[1]["id"] == "boon2"
     assert positions[2]["id"] == "boon3"
+    assert positions[0]["device_ts"] is not None
     assert queues == [1, 2, 3]
     assert len(raw) > 0
 

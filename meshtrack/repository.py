@@ -46,6 +46,7 @@ class Repository:
         batt REAL,
         voltage REAL,
         sos INTEGER,
+        recv_ts REAL,
         PRIMARY KEY(ts, tracker_id)
     );
     CREATE INDEX IF NOT EXISTS idx_pos_trk_ts ON positions(tracker_id, ts);
@@ -65,6 +66,16 @@ class Repository:
     def _ensure_schema(self):
         with self._connect() as conn:
             conn.executescript(self.SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection):
+        """Добавляет колонку recv_ts в существующую БД и заполняет её."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+        if "recv_ts" not in cols:
+            conn.execute("ALTER TABLE positions ADD COLUMN recv_ts REAL")
+            conn.execute(
+                "UPDATE positions SET recv_ts = ts WHERE recv_ts IS NULL"
+            )
 
     def add_position(
         self,
@@ -76,16 +87,23 @@ class Repository:
         voltage: float | None = None,
         sos: int | None = None,
         ts: float | None = None,
+        recv_ts: float | None = None,
     ) -> None:
-        """Добавляет позицию. Время по умолчанию — now()."""
+        """Добавляет позицию.
+
+        ts — время с устройства (при недоступности — время приёма).
+        recv_ts — время приёма пакета на ПК; по умолчанию = ts.
+        """
         if ts is None:
             ts = time.time()
+        if recv_ts is None:
+            recv_ts = ts
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO positions
-                   (ts, tracker_id, lat, lon, alt, batt, voltage, sos)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (ts, tracker_id, lat, lon, alt, batt, voltage, sos),
+                   (ts, tracker_id, lat, lon, alt, batt, voltage, sos, recv_ts)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (ts, tracker_id, lat, lon, alt, batt, voltage, sos, recv_ts),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO trackers(id) VALUES (?)",
@@ -104,18 +122,18 @@ class Repository:
             return dict(row) if row else None
 
     def active_trackers(self, max_age_s: float = 300) -> list[dict]:
-        """Список трекеров с позицией не старше max_age_s."""
+        """Список трекеров с пакетом, принятым не старше max_age_s (recv_ts)."""
         cutoff = time.time() - max_age_s
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT p.* FROM positions p
                    INNER JOIN (
-                       SELECT tracker_id, MAX(ts) AS ts
+                       SELECT tracker_id, MAX(recv_ts) AS recv_ts
                        FROM positions
                        GROUP BY tracker_id
-                   ) m ON p.tracker_id = m.tracker_id AND p.ts = m.ts
-                   WHERE p.ts >= ?
-                   ORDER BY p.ts DESC""",
+                   ) m ON p.tracker_id = m.tracker_id AND p.recv_ts = m.recv_ts
+                   WHERE p.recv_ts >= ?
+                   ORDER BY p.recv_ts DESC""",
                 (cutoff,),
             ).fetchall()
             return [dict(r) for r in rows]

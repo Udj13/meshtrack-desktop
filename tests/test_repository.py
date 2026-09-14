@@ -39,6 +39,18 @@ def test_active_trackers_age(repo: Repository):
     assert active[0]["tracker_id"] == "boon1"
 
 
+def test_recv_ts_separate_from_ts(repo: Repository):
+    repo.add_position("boon1", 54.0, 45.0, ts=1700000000.0, recv_ts=1750000000.0)
+    latest = repo.latest("boon1")
+    assert latest["ts"] == 1700000000.0
+    assert latest["recv_ts"] == 1750000000.0
+
+    now = time.time()
+    repo.add_position("boon2", 54.1, 45.1, ts=now)
+    latest2 = repo.latest("boon2")
+    assert latest2["recv_ts"] == latest2["ts"]
+
+
 def test_last_points(repo: Repository):
     now = time.time()
     for i in range(5):

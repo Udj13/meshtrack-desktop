@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QTime, QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -116,7 +116,7 @@ class TrackerPanel(QWidget):
     trackerClicked = Signal(str)
     trackerDoubleClicked = Signal(str)
 
-    COLUMNS = ["", "ID", "GS", "Курс", "Варио", "Высота", "Заряд", "Напр.", "Обновлён"]
+    COLUMNS = ["", "ID", "Скорость", "Курс", "Варио", "Высота", "Заряд", "Напр.", "Обновлён"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -525,14 +525,15 @@ class MainWindow(QMainWindow):
         download_action.triggered.connect(self._on_download_map)
 
         data_menu = menu_bar.addMenu("Данные")
+        settings_action = QAction("Настройки…", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._open_settings)
+        data_menu.addAction(settings_action)
+        data_menu.addSeparator()
         gpx_action = data_menu.addAction("Экспорт GPX…")
         gpx_action.triggered.connect(lambda: self._export_tracks("gpx"))
         csv_action = data_menu.addAction("Экспорт CSV…")
         csv_action.triggered.connect(lambda: self._export_tracks("csv"))
-
-        settings_action = menu_bar.addAction("Настройки…")
-        settings_action.setShortcut("Ctrl+,")
-        settings_action.triggered.connect(self._open_settings)
 
     def _open_settings(self):
         """Диалог настроек: Traccar, serial, retention, экспорт."""
@@ -585,7 +586,8 @@ class MainWindow(QMainWindow):
     def _export_tracks(self, fmt: str, parent=None):
         """Экспорт всех трекеров за текущий фильтр истории в GPX/CSV."""
         parent = parent or self
-        # Пересчитываем диапазон: «Сегодня»/«Вчера» должны включать свежие точки
+        # Пересчитываем диапазон: «Сегодня»/«Вчера» должны включать свежие точки.
+        # Пушим в JS, чтобы видимая карта соответствовала экспортируемому периоду.
         self._track_ts_from, self._track_ts_to = self._current_filter_range()
         if self._web_loaded:
             self._push_filter_to_js()
@@ -668,13 +670,14 @@ class MainWindow(QMainWindow):
     def _on_filter_changed(self, index: int):
         self._apply_filter_range(index)
 
-    def _current_filter_range(self) -> tuple[float, float]:
+    def _current_filter_range(self, index: int | None = None) -> tuple[float, float]:
         """Актуальный диапазон фильтра.
 
         Для «Сегодня»/«Вчера» правый край пересчитывается как now — иначе
         позиции, принятые после запуска/смены фильтра, не попадают в выборку.
         """
-        index = self._filter_combo.currentIndex() if self._filter_combo else 0
+        if index is None:
+            index = self._filter_combo.currentIndex() if self._filter_combo else 0
         now = QDateTime.currentDateTime()
         if index == 1:  # Вчера
             today = QDateTime(now.date(), QTime(0, 0, 0))
@@ -688,7 +691,7 @@ class MainWindow(QMainWindow):
         if index == 2:  # Период
             self._select_period_dialog()
             return
-        self._track_ts_from, self._track_ts_to = self._current_filter_range()
+        self._track_ts_from, self._track_ts_to = self._current_filter_range(index)
         if self._web_loaded:
             self._push_filter_to_js()
 
@@ -834,9 +837,12 @@ class MainWindow(QMainWindow):
         self.status_port.setStyleSheet("color: gray;")
 
     def _handle_position(self, pos: dict):
-        # Добавляем ts и сохраняем
+        # ts — время с устройства; recv_ts — время приёма на ПК
         pos = dict(pos)
-        pos["ts"] = time.time()
+        recv_ts = time.time()
+        device_ts = pos.get("device_ts")
+        pos["ts"] = device_ts if device_ts is not None else recv_ts
+        pos["recv_ts"] = recv_ts
         tracker_id = pos.get("id", "unknown")
 
         lat = float(pos.get("lat", 0))
@@ -846,8 +852,8 @@ class MainWindow(QMainWindow):
         voltage = float(pos.get("voltage")) if "voltage" in pos else None
         sos = int(pos.get("sos", 0)) if "sos" in pos else None
 
-        device_ts = pos.get("timestamp") or "N/A"
-        recv_ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(pos["ts"]))
+        device_ts_str = pos.get("timestamp") or "N/A"
+        recv_ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(recv_ts))
         self.logger.info(
             "Позиция от %s: lat=%s lon=%s alt=%s batt=%s%% "
             "(время устройства: %s, принято: %s)",
@@ -856,8 +862,8 @@ class MainWindow(QMainWindow):
             lon,
             alt if alt is not None else "—",
             batt if batt is not None else "—",
-            device_ts,
-            recv_ts,
+            device_ts_str,
+            recv_ts_str,
         )
         try:
             self.repo.add_position(
@@ -869,6 +875,7 @@ class MainWindow(QMainWindow):
                 voltage=voltage,
                 sos=sos,
                 ts=pos["ts"],
+                recv_ts=recv_ts,
             )
         except Exception:
             self.logger.exception("Ошибка сохранения позиции в БД")
@@ -877,12 +884,14 @@ class MainWindow(QMainWindow):
         cache = self._points_cache.setdefault(tracker_id, [])
         cache.append((pos["ts"], lat, lon, alt))
         cutoff = pos["ts"] - self._track_history_seconds
-        self._points_cache[tracker_id] = [p for p in cache if p[0] >= cutoff]
+        cache = [p for p in cache if p[0] >= cutoff]
+        cache.sort(key=lambda p: p[0])
+        self._points_cache[tracker_id] = cache
 
         metrics = derive(self._points_cache[tracker_id])
         pos.update(metrics)
         pos["color"] = color_for_id(tracker_id)
-        pos["stale"] = is_stale(pos["ts"])
+        pos["stale"] = False
         self._last_positions[tracker_id] = pos
 
         if not self._first_position_logged:
@@ -898,17 +907,12 @@ class MainWindow(QMainWindow):
         """Раз в 30 с проверяет, не устарели ли сохранённые позиции."""
         now = time.time()
         for tracker_id, pos in self._last_positions.items():
-            current = bool(pos.get("stale", False))
-            new_state = is_stale(pos.get("ts"), now)
-            if new_state != current:
-                pos["stale"] = new_state
-                self.logger.info(
-                    "Трекер %s теперь %s",
-                    tracker_id,
-                    "устаревший" if new_state else "актуальный",
-                )
-                self.tracker_panel.update_tracker(pos)
-                self.bridge.pushPosition(pos)
+            if pos.get("stale") or not is_stale(pos.get("ts"), now):
+                continue
+            pos["stale"] = True
+            self.logger.info("Трекер %s устарел", tracker_id)
+            self.tracker_panel.update_tracker(pos)
+            self.bridge.pushPosition(pos)
 
     def _handle_queue_size(self, size: int):
         self.status_queue.setText(f"Queue: {size}")
@@ -932,7 +936,7 @@ class MainWindow(QMainWindow):
         if self._last_data_ts is None:
             return
         elapsed = time.time() - self._last_data_ts
-        if elapsed > 5.0 and not self._data_silence_warned:
+        if elapsed > 60.0 and not self._data_silence_warned:
             self.logger.warning(
                 "С порта %s не поступают данные %.0f с",
                 self._worker.port,

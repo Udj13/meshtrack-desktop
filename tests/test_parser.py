@@ -31,6 +31,7 @@ def test_parse_all_fields():
     assert p["lon"] == "45.67890"
     assert p["altitude"] == "1230"
     assert p["timestamp"] == "2026-09-10T12:34:56Z"
+    assert p["device_ts"] == 1789043696.0
     assert p["sos"] == "0"
     assert p["voltage"] == "4020"
     assert p["batt"] == "87"
@@ -47,6 +48,7 @@ def test_partial_block():
     assert p["id"] == "boon7"
     assert p["lat"] == "1.23"
     assert "timestamp" not in p
+    assert "device_ts" not in p
 
 
 def test_empty_block():

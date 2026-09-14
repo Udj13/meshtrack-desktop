@@ -3,7 +3,7 @@
 Не имеет зависимостей Qt/serial, можно тестировать headless.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Маркеры начала/конца блока данных (как в main.py)
 START_MARKERS = ("Radio Received packet!",)
@@ -36,6 +36,7 @@ def parse_data(data_block: str) -> dict:
         try:
             dt = datetime.strptime(params['datetime'], '%Y-%m-%d %H:%M:%S')
             params['timestamp'] = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+            params['device_ts'] = dt.replace(tzinfo=timezone.utc).timestamp()
             del params['datetime']
         except ValueError:
             params['timestamp'] = 'N/A'
