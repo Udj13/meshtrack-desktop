@@ -1,6 +1,7 @@
-"""Точка входа: python -m meshtrack [--port PORT] [--debug]"""
+"""Точка входа: python -m meshtrack [--port PORT] [--debug] [--demo]"""
 import argparse
 import logging
+import os
 import sys
 
 from PySide6.QtWidgets import QApplication
@@ -19,7 +20,15 @@ def main():
         action="store_true",
         help="Включить DEBUG-уровень логирования (raw-строки из порта и т.п.)",
     )
+    ap.add_argument(
+        "--demo",
+        action="store_true",
+        help="Демо-режим: моковые данные без приёмника "
+        "(также env MESHTRACK_DEMO=1); отключается запуском без флага",
+    )
     args, qt_argv = ap.parse_known_args()
+
+    demo = args.demo or os.environ.get("MESHTRACK_DEMO") == "1"
 
     # Регистрация кастомной схемы map:// должна произойти до создания QApplication.
     register_map_scheme()
@@ -35,8 +44,8 @@ def main():
         if not ok:
             return 0
 
-    win = MainWindow(debug=args.debug)
-    if args.port:
+    win = MainWindow(debug=args.debug, demo=demo)
+    if args.port and not demo:
         win._connect_serial(args.port)
     win.show()
     return app.exec()

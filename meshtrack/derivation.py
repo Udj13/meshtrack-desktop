@@ -1,7 +1,7 @@
 """Вычисление производных метрик из истории точек трекера.
 
 Чистые функции: на вход — список точек ``(ts, lat, lon, alt)``,
-на выход — GS (км/ч), курс (°), варио (м/с) и тренд (↗/↘/—).
+на выход — GS (км/ч), курс (°), варио (м/с) и тренд (▲/▼/—).
 """
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from typing import Iterable
 
 EARTH_RADIUS_M = 6371000.0
 EMA_ALPHA = 0.5
-TREND_UP = "↗"
-TREND_DOWN = "↘"
+TREND_UP = "▲"
+TREND_DOWN = "▼"
 TREND_FLAT = "—"
 
 

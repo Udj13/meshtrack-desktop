@@ -50,7 +50,7 @@ def test_climb_vario_and_trend():
     result = derive(pts)
     assert result["vario_ms"] is not None
     assert 1.3 <= result["vario_ms"] <= 1.7
-    assert result["trend"] == "↗"
+    assert result["trend"] == "▲"
 
 
 def test_descend_vario_and_trend():
@@ -60,7 +60,7 @@ def test_descend_vario_and_trend():
     result = derive(pts)
     assert result["vario_ms"] is not None
     assert -2.3 <= result["vario_ms"] <= -1.7
-    assert result["trend"] == "↘"
+    assert result["trend"] == "▼"
 
 
 def test_circle_course_matches_tangent():

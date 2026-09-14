@@ -95,7 +95,11 @@ const markers = {};
 const arrows = {};
 const trackLayers = {};
 const visibleTracks = new Set();
+const lastTrackReload = {};
 let firstPosition = true;
+
+// Как часто (мс) обновлять трек видимого трекера при поступлении новых точек.
+const TRACK_RELOAD_INTERVAL_MS = 5000;
 
 let trackFilter = { from: 0, to: 0 };
 let trackColorMode = "palette";
@@ -136,6 +140,9 @@ function updateMarker(pos) {
     const staleHtml = stale
         ? "<br><span style='color:gray;font-weight:bold;'>Данные устарели (>20 мин)</span>"
         : "";
+    const trackLink = `<a href="#" onclick="event.preventDefault(); toggleTrack('${id}'); return false;">${
+        visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
+    }</a>`;
     const popupHtml = `
         <b>${id}</b><br>
         Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
@@ -146,6 +153,7 @@ function updateMarker(pos) {
         Обновлено ${formatAge(ts)} назад
         ${sos ? "<br><span style='color:red;font-weight:bold;'>SOS</span>" : ""}
         ${staleHtml}
+        <br>${trackLink}
     `;
 
     let marker = markers[id];
@@ -269,13 +277,21 @@ function loadTrack(id) {
     });
 }
 
+function showTrack(id) {
+    visibleTracks.add(id);
+    loadTrack(id);
+}
+
+function hideTrack(id) {
+    visibleTracks.delete(id);
+    removeTrack(id);
+}
+
 function toggleTrack(id) {
     if (visibleTracks.has(id)) {
-        visibleTracks.delete(id);
-        removeTrack(id);
+        hideTrack(id);
     } else {
-        visibleTracks.add(id);
-        loadTrack(id);
+        showTrack(id);
     }
 }
 
@@ -308,6 +324,16 @@ function onHistoryCleared() {
 function onPosition(pos) {
     try {
         updateMarker(pos);
+        // Видимые треки догружаем по мере поступления новых точек: иначе трек,
+        // включённый до появления истории, так и остался бы пустым.
+        if (pos.id && visibleTracks.has(pos.id)) {
+            const nowMs = Date.now();
+            const last = lastTrackReload[pos.id] || 0;
+            if (nowMs - last >= TRACK_RELOAD_INTERVAL_MS) {
+                lastTrackReload[pos.id] = nowMs;
+                loadTrack(pos.id);
+            }
+        }
     } catch (e) {
         console.error("updateMarker error:", e);
     }

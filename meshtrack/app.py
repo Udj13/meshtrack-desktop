@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .demo import DemoWorker, demo_base_point, seed_demo_history
 from .derivation import derive
 from .exporter import collect_tracks, export_csv, export_gpx
 from .first_run_wizard import run_download_map_wizard
@@ -328,10 +330,14 @@ class SettingsDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, demo: bool = False):
         super().__init__()
         self.setWindowTitle("MeshTrack")
         self.resize(1400, 850)
+
+        self._demo = bool(demo)
+        self._demo_worker: DemoWorker | None = None
+        self._demo_seeded = False
 
         # Данные
         self.data_dir = app_data_dir()
@@ -350,12 +356,22 @@ class MainWindow(QMainWindow):
         self.qt_log_handler = QtLogHandler(self)
         self.logger.addHandler(self.qt_log_handler)
 
-        self.repo = Repository(str(self.data_dir / "meshtrack.db"))
-        self.logger.info("База данных: %s", self.data_dir / "meshtrack.db")
+        # В демо-режиме используется отдельная БД, чтобы не засорять историю.
+        db_name = "meshtrack-demo.db" if self._demo else "meshtrack.db"
+        self.repo = Repository(str(self.data_dir / db_name))
+        self.logger.info("База данных: %s", self.data_dir / db_name)
+        if self._demo:
+            self.logger.warning(
+                "ДЕМО-РЕЖИМ: тестовые данные (%s); отключается запуском без "
+                "--demo / MESHTRACK_DEMO=1",
+                db_name,
+            )
 
-        # Traccar (опция, по умолчанию выключена — enqueue будет no-op)
+        # Traccar (опция, по умолчанию выключена — enqueue будет no-op).
+        # В демо-режиме принудительно выключен, чтобы моковые точки не уходили
+        # на free-gps.ru.
         self.publisher = TraccarPublisher(
-            enable=self.settings.traccar_on, logger=self.logger
+            enable=self.settings.traccar_on and not self._demo, logger=self.logger
         )
 
         # Очистка истории по retention_days
@@ -473,8 +489,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
         self.qt_log_handler.logRecord.connect(self.log_edit.appendPlainText)
 
-        # Инициализация портов
+        # Инициализация портов / демо-потока
         self._refresh_ports()
+        if self._demo:
+            self._start_demo()
 
     def _on_web_load_finished(self, ok: bool):
         self.logger.info("WebView loadFinished ok=%s", ok)
@@ -534,6 +552,17 @@ class MainWindow(QMainWindow):
         gpx_action.triggered.connect(lambda: self._export_tracks("gpx"))
         csv_action = data_menu.addAction("Экспорт CSV…")
         csv_action.triggered.connect(lambda: self._export_tracks("csv"))
+        data_menu.addSeparator()
+
+        # Быстрое включение/выключение моковых данных без перезапуска.
+        self._demo_action = QAction("Демо-режим (тестовые данные)", self)
+        self._demo_action.setCheckable(True)
+        self._demo_action.setStatusTip(
+            "Моковые позиции вместо serial-приёмника; отключается снятием галки"
+        )
+        self._demo_action.setChecked(self._demo)
+        self._demo_action.toggled.connect(self._on_demo_toggled)
+        data_menu.addAction(self._demo_action)
 
     def _open_settings(self):
         """Диалог настроек: Traccar, serial, retention, экспорт."""
@@ -559,7 +588,7 @@ class MainWindow(QMainWindow):
         except Exception:
             self.logger.exception("Ошибка сохранения настроек")
 
-        self.publisher.enable = self.settings.traccar_on
+        self.publisher.enable = self.settings.traccar_on and not self._demo
         self.logger.info(
             "Настройки: Traccar=%s, порт=%s, baud=%d, retention=%d дн.",
             "вкл" if self.settings.traccar_on else "выкл",
@@ -785,6 +814,9 @@ class MainWindow(QMainWindow):
         for p in ports:
             self.port_combo.addItem(p)
 
+        if self._demo:
+            return  # в демо-режиме serial не подключаем
+
         # Автоподключение: сохранённый port_pref, иначе единственный порт
         pref = self.settings.port_pref
         if pref and pref in ports:
@@ -806,10 +838,24 @@ class MainWindow(QMainWindow):
             self.logger.exception("Ошибка сохранения настроек")
         self._connect_serial(port)
 
+    def _attach_worker(self, worker):
+        """Подключает сигналы потока данных (SerialWorker или DemoWorker)."""
+        worker.finished.connect(self._on_worker_finished)
+        worker.position.connect(self._handle_position)
+        worker.queue_size.connect(self._handle_queue_size)
+        worker.error.connect(self._handle_serial_error)
+        worker.raw_line.connect(self._handle_raw_line)
+        worker.start()
+
     def _connect_serial(self, port: str):
         if self._worker is not None:
             self._worker.stop()
             self._worker = None
+        self._stop_demo()
+        if self._demo_action.isChecked():
+            self._demo_action.blockSignals(True)
+            self._demo_action.setChecked(False)
+            self._demo_action.blockSignals(False)
 
         baud = self.settings.baud
         self.logger.info("Подключение к порту %s (baud=%d)", port, baud)
@@ -820,18 +866,80 @@ class MainWindow(QMainWindow):
         self._data_timer.start()
 
         self._worker = SerialWorker(port, baud=baud, parent=self)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.position.connect(self._handle_position)
-        self._worker.queue_size.connect(self._handle_queue_size)
-        self._worker.error.connect(self._handle_serial_error)
-        self._worker.raw_line.connect(self._handle_raw_line)
-        self._worker.start()
+        self._attach_worker(self._worker)
 
         self.status_port.setText(f"Порт: {port}")
         self.status_port.setStyleSheet("color: green;")
 
+    def _on_demo_toggled(self, enabled: bool):
+        if enabled:
+            self._start_demo()
+        else:
+            self._stop_demo()
+
+    def _start_demo(self):
+        """Запускает генератор моковых позиций вместо serial-порта."""
+        if self._worker is not None:
+            self._worker.stop()
+            self._worker = None
+        self._stop_demo()
+
+        base_lat, base_lon = demo_base_point(self.settings)
+        if not self._demo:
+            self.logger.warning(
+                "Демо-режим включён вручную: тестовые точки пишутся в %s",
+                Path(self.repo.db_path).name,
+            )
+        if not self._demo_seeded:
+            # Заполнение истории — в фоне, чтобы не тормозить запуск окна.
+            self._demo_seeded = True
+            threading.Thread(
+                target=self._seed_demo_history,
+                args=(base_lat, base_lon),
+                daemon=True,
+            ).start()
+
+        self._last_data_ts = time.time()
+        self._first_data_logged = False
+        self._first_position_logged = False
+        self._data_silence_warned = False
+        self._data_timer.start()
+
+        self._demo_worker = DemoWorker(base_lat=base_lat, base_lon=base_lon, parent=self)
+        self._attach_worker(self._demo_worker)
+
+        self.status_port.setText("Порт: ДЕМО")
+        self.status_port.setStyleSheet("color: #b8860b;")
+        self.logger.info(
+            "Демо-режим включён: генерируются тестовые позиции (центр %.5f, %.5f)",
+            base_lat,
+            base_lon,
+        )
+
+    def _seed_demo_history(self, base_lat: float, base_lon: float):
+        """Фоновое заполнение демо-истории (вызывается из потока)."""
+        try:
+            added = seed_demo_history(
+                self.repo, base_lat=base_lat, base_lon=base_lon
+            )
+            if added:
+                self.logger.info("Демо-история: добавлено %d точек", added)
+        except Exception:
+            self.logger.exception("Ошибка заполнения демо-истории")
+
+    def _stop_demo(self):
+        """Останавливает демо-поток (если запущен)."""
+        if self._demo_worker is None:
+            return
+        self._demo_worker.stop()
+        self._demo_worker = None
+        self._data_timer.stop()
+        self.status_port.setText("Порт: нет")
+        self.status_port.setStyleSheet("color: gray;")
+        self.logger.info("Демо-режим выключен")
+
     def _on_worker_finished(self):
-        self.logger.info("SerialWorker завершён")
+        self.logger.info("Поток данных завершён")
         self._data_timer.stop()
         self.status_port.setText("Порт: отключён")
         self.status_port.setStyleSheet("color: gray;")
@@ -922,16 +1030,25 @@ class MainWindow(QMainWindow):
         self.status_port.setStyleSheet("color: red;")
         self.logger.error("Serial error: %s", msg)
 
+    def _active_worker(self):
+        """Активный поток данных: serial или демо."""
+        return self._worker or self._demo_worker
+
     def _handle_raw_line(self, line: str):
         self.logger.debug("RAW: %s", line)
         self._last_data_ts = time.time()
         self._data_silence_warned = False
         if not self._first_data_logged:
-            self.logger.info("Данные с устройства на порту %s поступают", self._worker.port if self._worker else "?")
+            worker = self._active_worker()
+            self.logger.info(
+                "Данные с устройства на порту %s поступают",
+                worker.port if worker is not None else "?",
+            )
             self._first_data_logged = True
 
     def _check_data_silence(self):
-        if self._worker is None or not self._worker.isRunning():
+        worker = self._active_worker()
+        if worker is None or not worker.isRunning():
             return
         if self._last_data_ts is None:
             return
@@ -939,7 +1056,7 @@ class MainWindow(QMainWindow):
         if elapsed > 60.0 and not self._data_silence_warned:
             self.logger.warning(
                 "С порта %s не поступают данные %.0f с",
-                self._worker.port,
+                worker.port,
                 elapsed,
             )
             self._data_silence_warned = True
@@ -960,16 +1077,22 @@ class MainWindow(QMainWindow):
         self.status_map.setText(f"Карта: {map_id}")
 
     def _on_tracker_clicked(self, tracker_id: str):
-        self.web.page().runJavaScript(f'centerTracker("{tracker_id}")')
+        # Клик по трекеру: центрируем карту и показываем трек (история).
+        self.web.page().runJavaScript(
+            f'centerTracker("{tracker_id}"); showTrack("{tracker_id}");'
+        )
 
     def _on_tracker_double_clicked(self, tracker_id: str):
-        self.web.page().runJavaScript(f'toggleTrack("{tracker_id}")')
+        # Двойной клик скрывает трек (повторный клик снова покажет).
+        self.web.page().runJavaScript(f'hideTrack("{tracker_id}")')
 
     def closeEvent(self, event):
         self.logger.info("Закрытие приложения")
         self._stale_timer.stop()
         if self._worker is not None:
             self._worker.stop()
+        if self._demo_worker is not None:
+            self._demo_worker.stop()
         self.publisher.flush(timeout=1.0)
         self.publisher.stop()
         event.accept()
