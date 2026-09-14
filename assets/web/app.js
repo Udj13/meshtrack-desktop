@@ -100,15 +100,17 @@ let firstPosition = true;
 let trackFilter = { from: 0, to: 0 };
 let trackColorMode = "palette";
 
-function makeMarkerHtml(color, trend, sos) {
-    return `<div class="tracker-marker${sos ? " sos" : ""}" style="
+function makeMarkerHtml(color, trend, sos, stale) {
+    const extra = (sos ? " sos" : "") + (stale ? " stale" : "");
+    return `<div class="tracker-marker${extra}" style="
         width:14px;height:14px;background:${color};">${trend}</div>`;
 }
 
-function makeArrowHtml(color, lengthPx, courseDeg) {
+function makeArrowHtml(color, lengthPx, courseDeg, stale) {
     // courseDeg: 0° = север. В CSS 0° = восток (3 часа), поэтому сдвигаем на -90°.
     const rotate = (courseDeg - 90).toFixed(1);
-    return `<div class="course-arrow" style="
+    const extra = stale ? " stale" : "";
+    return `<div class="course-arrow${extra}" style="
         width:${lengthPx.toFixed(0)}px;background:${color};
         transform:rotate(${rotate}deg);"></div>`;
 }
@@ -123,6 +125,7 @@ function updateMarker(pos) {
     const batt = pos.batt !== undefined && pos.batt !== null ? pos.batt + "%" : "—";
     const volt = pos.voltage !== undefined && pos.voltage !== null ? (pos.voltage / 1000).toFixed(2) + " В" : "—";
     const sos = pos.sos === 1 || pos.sos === "1";
+    const stale = Boolean(pos.stale);
     const ts = pos.ts || (Date.now() / 1000);
 
     const trend = pos.trend || "—";
@@ -130,6 +133,9 @@ function updateMarker(pos) {
     const course = pos.course_deg !== undefined && pos.course_deg !== null ? pos.course_deg.toFixed(0) : null;
     const vario = pos.vario_ms !== undefined && pos.vario_ms !== null ? pos.vario_ms.toFixed(1) : null;
 
+    const staleHtml = stale
+        ? "<br><span style='color:gray;font-weight:bold;'>Данные устарели (>20 мин)</span>"
+        : "";
     const popupHtml = `
         <b>${id}</b><br>
         GS: ${gs !== null ? gs + " км/ч" : "—"}<br>
@@ -139,6 +145,7 @@ function updateMarker(pos) {
         Заряд: ${batt} (${volt})<br>
         Обновлено ${formatAge(ts)} назад
         ${sos ? "<br><span style='color:red;font-weight:bold;'>SOS</span>" : ""}
+        ${staleHtml}
     `;
 
     let marker = markers[id];
@@ -147,7 +154,7 @@ function updateMarker(pos) {
             className: "",
             iconSize: [14, 14],
             iconAnchor: [7, 7],
-            html: makeMarkerHtml(color, trend, sos)
+            html: makeMarkerHtml(color, trend, sos, stale)
         });
         marker = L.marker([lat, lon], { icon: icon, zIndexOffset: 1000 }).addTo(map);
         marker.bindPopup(popupHtml);
@@ -162,6 +169,7 @@ function updateMarker(pos) {
                 inner.style.background = color;
                 inner.textContent = trend;
                 inner.classList.toggle("sos", sos);
+                inner.classList.toggle("stale", stale);
             }
         }
         marker.setPopupContent(popupHtml);
@@ -175,7 +183,7 @@ function updateMarker(pos) {
             className: "",
             iconSize: [arrowLen, 4],
             iconAnchor: [0, 2],
-            html: makeArrowHtml(color, arrowLen, parseFloat(course))
+            html: makeArrowHtml(color, arrowLen, parseFloat(course), stale)
         });
         if (!arrow) {
             arrow = L.marker([lat, lon], { icon: arrowIcon, zIndexOffset: 500, interactive: false }).addTo(map);

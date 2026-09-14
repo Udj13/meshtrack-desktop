@@ -70,6 +70,17 @@ PALETTE = [
 
 BAUD_CHOICES = ["9600", "19200", "38400", "57600", "115200", "230400"]
 
+# Возраст, после которого точка считается устаревшей (PROJECT.md §5)
+STALE_AGE_S = 20 * 60
+
+
+def is_stale(ts: float, now: float | None = None) -> bool:
+    """True, если данным больше STALE_AGE_S секунд."""
+    if ts is None:
+        return True
+    now = time.time() if now is None else now
+    return (now - ts) > STALE_AGE_S
+
 
 def color_for_id(tracker_id: str) -> str:
     """Детерминированный цвет трекера по его id (совместим с JS)."""
@@ -174,10 +185,21 @@ class TrackerPanel(QWidget):
             course_f = _float(course)
             vario_f = _float(vario)
 
+            stale = pos.get("stale")
+            if stale is None:
+                stale = is_stale(ts)
+
             chip = QTableWidgetItem()
             chip.setBackground(QColor(color))
             chip.setFlags(chip.flags() & ~Qt.ItemIsSelectable)
             chip.setToolTip(f"Цвет трекера {tracker_id}")
+
+            age_text = format_age(ts)
+            if stale:
+                age_text += " (!)"
+            age_item = QTableWidgetItem(age_text)
+            if stale:
+                age_item.setForeground(QColor("#808080"))
 
             items = [
                 chip,
@@ -190,7 +212,7 @@ class TrackerPanel(QWidget):
                 QTableWidgetItem(f"{alt_f:.0f} м" if alt_f is not None else "—"),
                 QTableWidgetItem(f"{batt_f:.0f}%" if batt_f is not None else "—"),
                 QTableWidgetItem(f"{(voltage_f / 1000):.2f} В" if voltage_f is not None else "—"),
-                QTableWidgetItem(format_age(ts)),
+                age_item,
             ]
             for col, item in enumerate(items):
                 self.table.setItem(row, col, item)
@@ -376,6 +398,14 @@ class MainWindow(QMainWindow):
         self._track_history_seconds = 600
         self._points_cache: dict[str, list[tuple[float, float, float, float | None]]] = {}
 
+        # Последние позиции трекеров — нужны для периодической перерисовки
+        # маркеров, когда данные устаревают (без нового пакета)
+        self._last_positions: dict[str, dict] = {}
+        self._stale_timer = QTimer(self)
+        self._stale_timer.setInterval(30_000)
+        self._stale_timer.timeout.connect(self._refresh_stale_states)
+        self._stale_timer.start()
+
         # Фильтры треков и видимые треки (видимость управляется в JS)
         self._track_ts_from: float = 0.0
         self._track_ts_to: float = 0.0
@@ -555,6 +585,10 @@ class MainWindow(QMainWindow):
     def _export_tracks(self, fmt: str, parent=None):
         """Экспорт всех трекеров за текущий фильтр истории в GPX/CSV."""
         parent = parent or self
+        # Пересчитываем диапазон: «Сегодня»/«Вчера» должны включать свежие точки
+        self._track_ts_from, self._track_ts_to = self._current_filter_range()
+        if self._web_loaded:
+            self._push_filter_to_js()
         ts_from = self._track_ts_from or None
         ts_to = self._track_ts_to or None
         try:
@@ -565,9 +599,25 @@ class MainWindow(QMainWindow):
             return
 
         total = sum(len(points) for points in tracks.values())
+        range_str = "{} — {}".format(
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_from))
+            if ts_from
+            else "…",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_to))
+            if ts_to
+            else "…",
+        )
         if total == 0:
+            self.logger.info("Экспорт %s: нет данных за период %s", fmt.upper(), range_str)
             QMessageBox.information(parent, "Экспорт", "За выбранный период нет данных.")
             return
+        self.logger.info(
+            "Экспорт %s: период %s, трекеров %d, точек %d",
+            fmt.upper(),
+            range_str,
+            len(tracks),
+            total,
+        )
 
         ext = fmt if fmt in ("gpx", "csv") else "gpx"
         start_dir = self.settings.exports_dir or str(self.data_dir)
@@ -618,19 +668,27 @@ class MainWindow(QMainWindow):
     def _on_filter_changed(self, index: int):
         self._apply_filter_range(index)
 
-    def _apply_filter_range(self, index: int):
+    def _current_filter_range(self) -> tuple[float, float]:
+        """Актуальный диапазон фильтра.
+
+        Для «Сегодня»/«Вчера» правый край пересчитывается как now — иначе
+        позиции, принятые после запуска/смены фильтра, не попадают в выборку.
+        """
+        index = self._filter_combo.currentIndex() if self._filter_combo else 0
         now = QDateTime.currentDateTime()
-        if index == 0:  # Сегодня
-            start = QDateTime(now.date(), QTime(0, 0, 0))
-            self._track_ts_from = start.toSecsSinceEpoch()
-            self._track_ts_to = now.toSecsSinceEpoch()
-        elif index == 1:  # Вчера
+        if index == 1:  # Вчера
             today = QDateTime(now.date(), QTime(0, 0, 0))
-            self._track_ts_from = today.addDays(-1).toSecsSinceEpoch()
-            self._track_ts_to = today.toSecsSinceEpoch()
-        else:  # Период
+            return today.addDays(-1).toSecsSinceEpoch(), today.toSecsSinceEpoch()
+        if index == 2:  # Период… (задан в диалоге)
+            return self._track_ts_from, self._track_ts_to
+        start = QDateTime(now.date(), QTime(0, 0, 0))
+        return start.toSecsSinceEpoch(), now.toSecsSinceEpoch()
+
+    def _apply_filter_range(self, index: int):
+        if index == 2:  # Период
             self._select_period_dialog()
             return
+        self._track_ts_from, self._track_ts_to = self._current_filter_range()
         if self._web_loaded:
             self._push_filter_to_js()
 
@@ -788,13 +846,18 @@ class MainWindow(QMainWindow):
         voltage = float(pos.get("voltage")) if "voltage" in pos else None
         sos = int(pos.get("sos", 0)) if "sos" in pos else None
 
+        device_ts = pos.get("timestamp") or "N/A"
+        recv_ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(pos["ts"]))
         self.logger.info(
-            "Позиция от %s: lat=%s lon=%s alt=%s batt=%s%%",
+            "Позиция от %s: lat=%s lon=%s alt=%s batt=%s%% "
+            "(время устройства: %s, принято: %s)",
             tracker_id,
             lat,
             lon,
             alt if alt is not None else "—",
             batt if batt is not None else "—",
+            device_ts,
+            recv_ts,
         )
         try:
             self.repo.add_position(
@@ -819,6 +882,8 @@ class MainWindow(QMainWindow):
         metrics = derive(self._points_cache[tracker_id])
         pos.update(metrics)
         pos["color"] = color_for_id(tracker_id)
+        pos["stale"] = is_stale(pos["ts"])
+        self._last_positions[tracker_id] = pos
 
         if not self._first_position_logged:
             self.logger.info("Получена первая позиция от %s", tracker_id)
@@ -828,6 +893,22 @@ class MainWindow(QMainWindow):
         self.bridge.pushPosition(pos)
         self.publisher.enqueue(pos)
         self._update_active_status()
+
+    def _refresh_stale_states(self):
+        """Раз в 30 с проверяет, не устарели ли сохранённые позиции."""
+        now = time.time()
+        for tracker_id, pos in self._last_positions.items():
+            current = bool(pos.get("stale", False))
+            new_state = is_stale(pos.get("ts"), now)
+            if new_state != current:
+                pos["stale"] = new_state
+                self.logger.info(
+                    "Трекер %s теперь %s",
+                    tracker_id,
+                    "устаревший" if new_state else "актуальный",
+                )
+                self.tracker_panel.update_tracker(pos)
+                self.bridge.pushPosition(pos)
 
     def _handle_queue_size(self, size: int):
         self.status_queue.setText(f"Queue: {size}")
@@ -882,6 +963,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.logger.info("Закрытие приложения")
+        self._stale_timer.stop()
         if self._worker is not None:
             self._worker.stop()
         self.publisher.flush(timeout=1.0)
