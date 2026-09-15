@@ -98,3 +98,73 @@ def test_remove_map(tmp_path: Path):
     assert cfg.remove_map("a") is True
     assert cfg.default_map_id() == "b"
     assert cfg.remove_map("a") is False
+
+
+def test_add_map_with_bbox_and_zooms(tmp_path: Path):
+    path = tmp_path / "config.json"
+    cfg = Settings(path)
+    cfg.add_map(
+        "custom",
+        "Кастом",
+        "/tmp/custom.mbtiles",
+        south=54.0,
+        north=54.1,
+        west=45.0,
+        east=45.1,
+        zmin=10,
+        zmax=12,
+    )
+    cfg.save()
+
+    cfg2 = Settings(path)
+    m = cfg2.maps[0]
+    assert m["south"] == 54.0
+    assert m["north"] == 54.1
+    assert m["west"] == 45.0
+    assert m["east"] == 45.1
+    assert m["zmin"] == 10
+    assert m["zmax"] == 12
+
+
+def test_add_map_without_extra_fields(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("mordovia", "Мордовия", "/tmp/mordovia.mbtiles")
+    m = cfg.maps[0]
+    assert set(m) == {"id", "name", "path"}
+
+
+def test_add_map_updates_extra_fields(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("m", "M", "/m.mbtiles", south=54.0, zmin=9)
+    cfg.add_map("m", "M", "/m.mbtiles", east=46.0, zmax=13)
+    m = cfg.maps[0]
+    assert m["south"] == 54.0
+    assert m["east"] == 46.0
+    assert m["zmin"] == 9
+    assert m["zmax"] == 13
+
+
+def test_first_existing_map_id(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    existing = tmp_path / "existing.mbtiles"
+    existing.write_bytes(b"x")
+    cfg.add_map("missing", "Нет файла", str(tmp_path / "nope.mbtiles"))
+    cfg.add_map("present", "Есть файл", str(existing))
+    assert cfg.first_existing_map_id() == "present"
+
+
+def test_first_existing_map_id_none(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("missing", "Нет файла", str(tmp_path / "nope.mbtiles"))
+    assert cfg.first_existing_map_id() is None
+
+
+def test_remove_active_map_switches_to_existing(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    existing = tmp_path / "existing.mbtiles"
+    existing.write_bytes(b"x")
+    cfg.add_map("a", "A", str(tmp_path / "a.mbtiles"))
+    cfg.add_map("b", "B", str(existing))
+    cfg.active_map_id = "a"
+    cfg.remove_map("a")
+    assert cfg.active_map_id == "b"

@@ -166,6 +166,14 @@ class Settings:
         maps = self._config.get("maps", [])
         return maps[0]["id"] if maps else None
 
+    def first_existing_map_id(self) -> str | None:
+        """Возвращает id первой карты, чей файл существует на диске."""
+        for m in self._config.get("maps", []):
+            path = m.get("path")
+            if path and Path(path).exists():
+                return m.get("id")
+        return None
+
     def get_map_path(self, map_id: str) -> str | None:
         """Путь к MBTiles по id карты."""
         for m in self._config.get("maps", []):
@@ -173,15 +181,40 @@ class Settings:
                 return m.get("path")
         return None
 
-    def add_map(self, map_id: str, name: str, path: str) -> None:
-        """Добавляет или обновляет карту."""
+    def add_map(
+        self,
+        map_id: str,
+        name: str,
+        path: str,
+        south: float | None = None,
+        north: float | None = None,
+        west: float | None = None,
+        east: float | None = None,
+        zmin: int | None = None,
+        zmax: int | None = None,
+    ) -> None:
+        """Добавляет или обновляет карту. Дополнительные поля сохраняются, если заданы."""
+        extra = {}
+        if south is not None:
+            extra["south"] = south
+        if north is not None:
+            extra["north"] = north
+        if west is not None:
+            extra["west"] = west
+        if east is not None:
+            extra["east"] = east
+        if zmin is not None:
+            extra["zmin"] = zmin
+        if zmax is not None:
+            extra["zmax"] = zmax
         maps = self._config.get("maps", [])
         for m in maps:
             if m.get("id") == map_id:
                 m["name"] = name
                 m["path"] = path
+                m.update(extra)
                 return
-        maps.append({"id": map_id, "name": name, "path": path})
+        maps.append({"id": map_id, "name": name, "path": path, **extra})
         self._config["maps"] = maps
 
     def remove_map(self, map_id: str) -> bool:
@@ -190,7 +223,7 @@ class Settings:
         after = [m for m in before if m.get("id") != map_id]
         self._config["maps"] = after
         if self._config.get("active_map_id") == map_id:
-            self._config["active_map_id"] = self.default_map_id()
+            self._config["active_map_id"] = self.first_existing_map_id()
         return len(after) < len(before)
 
     def as_dict(self) -> dict:
