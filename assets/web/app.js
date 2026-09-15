@@ -45,7 +45,8 @@ function colorForVario(vario) {
     }
 }
 
-const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
+const map = L.map("map").setView([54.4, 45.4], 13);
+L.control.attribution({ prefix: false }).addTo(map);
 
 let offlineLayer = null;
 let currentMapMinZoom = 2;
@@ -70,7 +71,7 @@ function setOfflineMapLayer(mapId, minZoom, maxZoom) {
         map.removeLayer(offlineLayer);
     }
     offlineLayer = L.tileLayer(url, {
-        attribution: "",
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors (ODbL), SRTM | © OpenTopoMap (CC-BY-SA)',
         minZoom: minZoom,
         maxZoom: maxZoom,
         tileSize: 256

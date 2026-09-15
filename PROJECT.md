@@ -210,6 +210,13 @@ Battery Level: 87%     # %
 
 - **Слой:** топографическая = OpenTopoMap
   (`https://tile.opentopomap.org/{z}/{x}/{y}.png`, растровые PNG).
+- **Атрибуция (обязательна):** на карте всегда отображается плашка
+  «© OpenStreetMap contributors (ODbL), SRTM | © OpenTopoMap (CC-BY-SA)»
+  (контрол Leaflet attribution, правый нижний угол, без префикса Leaflet).
+  Требование OpenTopoMap (tiles.opentopomap.org/about) и OSM (ODbL,
+  attribution guidelines); действует и для офлайн-использования тайлов.
+  Офлайн-загрузка легальна: тайлы берутся с `tile.opentopomap.org`
+  (офлайн-использование разрешено), а не с OSMF-серверов.
 - **Формат хранения:** MBTiles (SQLite): `metadata(name)`, `tiles(zoom_level,
   tile_column, tile_row, tile_data)`; один файл = одна область.
   Метаданные карты: `name`, `format`, `version`, `minzoom`, `maxzoom`,
