@@ -92,7 +92,7 @@ class MapManagerDialog(QDialog):
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Stretch)
+        header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -135,7 +135,10 @@ class MapManagerDialog(QDialog):
             self.table.setCellWidget(row, 7, self._action_widget(row, entry))
 
     def _set_item(self, row: int, col: int, text: str):
-        self.table.setItem(row, col, QTableWidgetItem(text))
+        item = QTableWidgetItem(text)
+        if text:
+            item.setToolTip(text)
+        self.table.setItem(row, col, item)
 
     @staticmethod
     def _format_bbox(entry: MapEntry) -> str:
