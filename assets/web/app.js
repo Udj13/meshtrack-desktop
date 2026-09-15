@@ -61,7 +61,7 @@ function applyMapZoomLimits(minZoom, maxZoom) {
 
 function setOfflineMapLayer(mapId, minZoom, maxZoom) {
     if (!mapId) {
-        console.warn("setOfflineMapLayer: empty mapId");
+        clearOfflineMapLayer();
         return;
     }
     const url = "map://" + mapId + "/{z}/{x}/{y}.png";
@@ -78,8 +78,21 @@ function setOfflineMapLayer(mapId, minZoom, maxZoom) {
     applyMapZoomLimits(minZoom, maxZoom);
 }
 
+function clearOfflineMapLayer() {
+    console.log("Clearing offline map layer");
+    if (offlineLayer) {
+        map.removeLayer(offlineLayer);
+        offlineLayer = null;
+    }
+    applyMapZoomLimits(2, 18);
+}
+
 function loadMapWithZoom(mapId) {
     if (!bridge) return;
+    if (!mapId) {
+        clearOfflineMapLayer();
+        return;
+    }
     bridge.getMinZoom(function(minZoom) {
         bridge.getMaxZoom(function(maxZoom) {
             minZoom = parseInt(minZoom) || 2;
@@ -357,7 +370,7 @@ if (typeof qt !== "undefined") {
             if (bridge.getActiveMapId) {
                 bridge.getActiveMapId(function(mapId) {
                     console.log("Initial active map id:", mapId);
-                    if (mapId) loadMapWithZoom(mapId);
+                    loadMapWithZoom(mapId);
                 });
             } else {
                 console.warn("bridge.getActiveMapId not available");
@@ -365,7 +378,7 @@ if (typeof qt !== "undefined") {
             if (bridge.activeMapChanged) {
                 bridge.activeMapChanged.connect(function(mapId) {
                     console.log("Active map changed:", mapId);
-                    if (mapId) loadMapWithZoom(mapId);
+                    loadMapWithZoom(mapId);
                 });
             }
             console.log("bridge connected");

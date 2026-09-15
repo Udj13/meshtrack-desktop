@@ -56,10 +56,16 @@ class WebBridge(QObject):
 
     @Slot(result=str)
     def getActiveMapId(self) -> str:
-        """Id активной карты для URL map://{id}/{z}/{x}/{y}.png."""
+        """Id активной карты для URL map://{id}/{z}/{x}/{y}.png.
+
+        Пустая строка означает «активной карты нет» (слой очищается).
+        """
         if self._settings is None:
             return ""
-        return self._settings.active_map_id or self._settings.default_map_id() or ""
+        active = self._settings.active_map_id
+        if active is None:
+            return self._settings.default_map_id() or ""
+        return active
 
     @Slot(str)
     def setActiveMapId(self, map_id: str):
@@ -81,7 +87,9 @@ class WebBridge(QObject):
     def _map_zoom_range(self) -> tuple[int, int]:
         if self._settings is None:
             return 9, 15
-        map_id = self._settings.active_map_id or self._settings.default_map_id()
+        map_id = self._settings.active_map_id
+        if map_id is None:
+            map_id = self._settings.default_map_id()
         if not map_id:
             return 9, 15
         path = self._settings.get_map_path(map_id)
