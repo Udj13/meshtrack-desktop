@@ -161,6 +161,11 @@ MeshTrack desktop/
   retention_days, «Экспорт GPX/CSV» (все трекеры за текущий фильтр истории,
   через `QFileDialog`). При старте приложение подключается к `port_pref`,
   если порт доступен, иначе — к единственному присутствующему.
+- **Меню «Помощь»:** «О программе» (название MeshTrack Desktop, версия из
+  `__version__`, описание, автор Евгений Шлягин, почта shlyagin@gmail.com —
+  кликабельная) и «Лицензии компонентов» (`LicensesDialog`): слева список
+  сторонних компонентов (название, версия, лицензия), справа — версия,
+  копирайт, сайт и полный текст лицензии (файлы `assets/licenses/`).
 
 **Палитра (12 цветов, детерминированно по id):** `#e6194b #3cb44b #ffe119
 #4363d8 #f58231 #911eb4 #46f0f0 #f032e6 #bfef45 #3cb44b #808000 #9a6324`
@@ -309,11 +314,23 @@ PySide-less pipeline): выдаёт легаси-текст на stdout-файл
   (пользователь качает регион в перв-запуск; оформить опцию выпуска
   «MeshTrackSetup-Saratov.exe» с предупакованным регіоном через GitHub
   Releases при необходимости).
-- **Лицензии третьих сторон:** Leaflet 1.9.4,
-  © 2010-2023 Vladimir Agafonkin, © 2010-2011 CloudMade — BSD-2-Clause
-  (копирайт-уведомление сохранено в заголовке `assets/web/leaflet.js`,
-  поставляется вместе с установщиком). Атрибуция OSM/OpenTopoMap — на карте
-  (см. §8); Leaflet на карте не упоминается (BSD этого не требует).
+- **Лицензии третьих сторон:** полные тексты лежат в `assets/licenses/`
+  (входят в поставку) и показываются в UI: «Помощь → Лицензии компонентов»
+  (`meshtrack/licenses.py` — данные, `licenses_dialog.py` — диалог).
+
+  | Компонент | Лицензия | Файл текста |
+  |---|---|---|
+  | PySide6 / Qt 6 (вкл. QtWebEngine) | LGPL-3.0 (либо GPL-2.0/3.0) | `lgpl-3.0.txt` |
+  | requests | Apache-2.0 | `apache-2.0.txt` |
+  | pyserial | BSD-3-Clause | `bsd-3-clause.txt` |
+  | Leaflet 1.9.4 | BSD-2-Clause | `bsd-2-clause.txt` |
+  | Python | PSF-2.0 | `psf-2.0.txt` |
+  | PyInstaller (только сборка) | GPL-2.0-or-later + bootloader exception | `gpl-2.0.txt` |
+  | Данные OSM / тайлы OpenTopoMap | ODbL-1.0 / CC-BY-SA-3.0 | `odbl-1.0.txt`, `cc-by-sa-3.0.txt` |
+
+  Копирайт Leaflet (© 2010-2023 Vladimir Agafonkin, © 2010-2011 CloudMade)
+  сохранён в заголовке `assets/web/leaflet.js`. Атрибуция OSM/OpenTopoMap —
+  на карте (см. §8); Leaflet на карте не упоминается (BSD этого не требует).
 
 ## 13. Рабочие команды (dev)
 

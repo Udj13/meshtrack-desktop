@@ -46,6 +46,7 @@ from .demo import DemoWorker, demo_base_point, seed_demo_history
 from .derivation import derive
 from .exporter import collect_tracks, export_csv, export_gpx
 from .first_run_wizard import run_download_map_wizard
+from .licenses_dialog import LicensesDialog
 from .logutil import QtLogHandler, setup_logging
 from .map_dialog import MapManagerDialog
 from .mapscheme import install_map_handler
@@ -344,7 +345,7 @@ class SettingsDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self, debug: bool = False, demo: bool = False):
         super().__init__()
-        self.setWindowTitle("MeshTrack")
+        self.setWindowTitle("MeshTrack Desktop")
         self.resize(1400, 850)
 
         self._demo = bool(demo)
@@ -581,6 +582,32 @@ class MainWindow(QMainWindow):
         self._demo_action.setChecked(self._demo)
         self._demo_action.toggled.connect(self._on_demo_toggled)
         data_menu.addAction(self._demo_action)
+
+        help_menu = menu_bar.addMenu("Помощь")
+        about_action = help_menu.addAction("О программе")
+        about_action.setStatusTip("Информация о MeshTrack Desktop")
+        about_action.triggered.connect(self._show_about)
+        licenses_action = help_menu.addAction("Лицензии компонентов")
+        licenses_action.setStatusTip("Сторонние компоненты, версии и тексты лицензий")
+        licenses_action.triggered.connect(self._show_licenses)
+
+    def _show_about(self):
+        """Диалог «О программе»."""
+        from . import __version__
+
+        text = (
+            "<h3>MeshTrack Desktop</h3>"
+            f"Версия {__version__}<br><br>"
+            "Бесплатная программа для локального отображения данных, "
+            "поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.<br><br>"
+            "Автор: Евгений Шлягин<br>"
+            'Почта: <a href="mailto:shlyagin@gmail.com">shlyagin@gmail.com</a>'
+        )
+        QMessageBox.about(self, "О программе", text)
+
+    def _show_licenses(self):
+        """Диалог со списком сторонних компонентов и текстами лицензий."""
+        LicensesDialog(self).exec()
 
     def _open_settings(self):
         """Диалог настроек: Traccar, serial, retention, экспорт."""
