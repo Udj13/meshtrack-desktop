@@ -45,7 +45,7 @@ function colorForVario(vario) {
     }
 }
 
-const map = L.map("map").setView([54.4, 45.4], 13);
+const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
 L.control.attribution({ prefix: false }).addTo(map);
 
 let offlineLayer = null;
