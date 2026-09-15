@@ -47,6 +47,7 @@ from .derivation import derive
 from .exporter import collect_tracks, export_csv, export_gpx
 from .first_run_wizard import run_download_map_wizard
 from .logutil import QtLogHandler, setup_logging
+from .map_dialog import MapManagerDialog
 from .mapscheme import install_map_handler
 from .publisher import TraccarPublisher
 from .repository import Repository
@@ -110,6 +111,17 @@ def format_age(ts: float | None) -> str:
     if dt < 60:
         return f"{dt} с"
     return f"{dt // 60} мин"
+
+
+class ClickableLabel(QLabel):
+    """QLabel, испускающий clicked при клике левой кнопкой мыши."""
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class TrackerPanel(QWidget):
@@ -459,7 +471,10 @@ class MainWindow(QMainWindow):
         self.status_port = QLabel("Порт: нет")
         self.status_queue = QLabel("Queue: —")
         self.status_active = QLabel("Активных: 0")
-        self.status_map = QLabel("Карта: —")
+        self.status_map = ClickableLabel("Карта: —")
+        self.status_map.setCursor(Qt.PointingHandCursor)
+        self.status_map.setToolTip("Управление картами")
+        self.status_map.clicked.connect(self._open_map_manager)
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(180)
         self.port_combo.activated.connect(self._on_port_selected)
@@ -541,6 +556,9 @@ class MainWindow(QMainWindow):
         download_action = map_menu.addAction("Загрузить новую карту…")
         download_action.setStatusTip("Скачать дополнительный регион для офлайн-карт")
         download_action.triggered.connect(self._on_download_map)
+        manage_action = map_menu.addAction("Управление картами…")
+        manage_action.setStatusTip("Список карт, статусы, удаление, докачка")
+        manage_action.triggered.connect(self._open_map_manager)
 
         data_menu = menu_bar.addMenu("Данные")
         settings_action = QAction("Настройки…", self)
@@ -695,6 +713,23 @@ class MainWindow(QMainWindow):
                 self.bridge.setActiveMapId(map_id)
             except Exception:
                 self.logger.exception("Ошибка сохранения настроек карты")
+
+    def _open_map_manager(self):
+        """Открывает диалог управления картами."""
+        dlg = MapManagerDialog(
+            self.settings, self.data_dir / "maps", bridge=self.bridge, parent=self
+        )
+        dlg.exec()
+        try:
+            self.settings.save()
+        except Exception:
+            self.logger.exception("Ошибка сохранения настроек")
+        self._update_map_status()
+        map_id = self.settings.active_map_id
+        try:
+            self.bridge.setActiveMapId(map_id or "")
+        except Exception:
+            self.logger.exception("Ошибка смены активной карты")
 
     def _on_filter_changed(self, index: int):
         self._apply_filter_range(index)
