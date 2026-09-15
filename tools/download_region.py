@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from meshtrack.downloader import _format_size, _format_time, download
+from meshtrack.downloader import _format_size, _format_time, download, estimate_tile_count
 from meshtrack.mapstore import MapStore
 from meshtrack.regions import get_prebuilt
 
@@ -58,6 +58,12 @@ def main():
     store.set_metadata("name", map_id)
     store.set_metadata("format", "png")
     store.set_metadata("version", "1.1")
+    south, north, west, east = bbox
+    store.set_metadata("bbox", f"{south},{north},{west},{east}")
+    store.set_metadata(
+        "tile_count_expected",
+        str(estimate_tile_count(south, north, west, east, args.zmin, args.zmax)),
+    )
 
     def on_progress(done: int, total: int, stats: dict):
         pct = done * 100 // total if total else 0
@@ -81,6 +87,8 @@ def main():
         workers=args.workers,
         on_progress=on_progress,
     )
+    if result.get("failed", 0) == 0:
+        store.set_metadata("complete", "1")
     print()
     size = _format_size(result.get("bytes_downloaded", 0))
     elapsed = result.get("elapsed_seconds", 0)

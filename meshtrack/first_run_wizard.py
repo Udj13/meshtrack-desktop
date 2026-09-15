@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import downloader, regions
+from .downloader import estimate_tile_count
 from .mapstore import MapStore
 from .settings import Settings
 
@@ -190,6 +191,16 @@ class RegionPage(QWizardPage):
         bbox = regions.normalize_bbox(south, north, west, east)
         return None, bbox
 
+    def preselect(self, region_id: str) -> bool:
+        """Выбирает встроенный регион по id. True, если регион найден."""
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.UserRole) == region_id:
+                self._radio_prebuilt.setChecked(True)
+                self._list.setCurrentRow(i)
+                return True
+        return False
+
 
 class DownloadPage(QWizardPage):
     def __init__(self, parent=None):
@@ -214,6 +225,7 @@ class DownloadPage(QWizardPage):
         self._thread: DownloadThread | None = None
         self._result: dict | None = None
         self._cancelled = False
+        self._store: MapStore | None = None
 
     def initializePage(self):
         wizard = self.wizard()
@@ -227,9 +239,16 @@ class DownloadPage(QWizardPage):
         self._progress.setValue(0)
 
         store = MapStore(dest)
+        self._store = store
         store.set_metadata("name", map_id)
         store.set_metadata("format", "png")
         store.set_metadata("version", "1.1")
+        south, north, west, east = bbox
+        store.set_metadata("bbox", f"{south},{north},{west},{east}")
+        store.set_metadata(
+            "tile_count_expected",
+            str(estimate_tile_count(south, north, west, east, zmin, zmax)),
+        )
 
         self._thread = DownloadThread(
             store, bbox, zmin, zmax, OPENTOPOMAP_TEMPLATE, parent=self
@@ -261,6 +280,8 @@ class DownloadPage(QWizardPage):
 
     def _on_finished(self, result: dict):
         self._result = result
+        if result.get("failed", 0) == 0 and self._store is not None:
+            self._store.set_metadata("complete", "1")
         size = downloader._format_size(result.get("bytes_downloaded", 0))
         elapsed = result.get("elapsed_seconds", 0)
         self._status.setText(
@@ -317,6 +338,7 @@ class FirstRunWizard(QWizard):
         maps_dir: Path,
         parent=None,
         show_welcome: bool = True,
+        preselect_region_id: str | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(
@@ -349,6 +371,8 @@ class FirstRunWizard(QWizard):
             self.addPage(WelcomePage(self))
         self._region_page = RegionPage(self)
         self.addPage(self._region_page)
+        if preselect_region_id:
+            self._region_page.preselect(preselect_region_id)
         self.addPage(DownloadPage(self))
         self.addPage(DonePage(self))
 
