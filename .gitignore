@@ -5,5 +5,7 @@ __pycache__/
 dist/
 build/
 installer/dist/
+installer/win/output/
 .DS_Store
 *.mbtiles
+.ruff_cache/
