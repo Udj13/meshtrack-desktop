@@ -31,6 +31,14 @@ SEED_STEP_S = 15.0
 
 TRACKER_IDS = ("boon101", "boon102", "boon103", "boon104")
 
+# Человекочитаемые имена для демо: планеры и параплан (как в реальном клубе).
+TRACKER_NAMES = {
+    "boon101": "АСК-21",
+    "boon102": "Дискус",
+    "boon103": "Бланик",
+    "boon104": "Параплан",
+}
+
 
 def local_midnight(ts: float | None = None) -> float:
     """Локальная полночь для момента ts (unix)."""
@@ -110,6 +118,7 @@ def position_at(
     sos = 1 if tracker_id == "boon104" and (t - t_ref) % 180 < 20 else 0
     return {
         "id": tracker_id,
+        "name": TRACKER_NAMES[tracker_id],
         "lat": round(lat, 5),
         "lon": round(lon, 5),
         "altitude": int(round(alt)),

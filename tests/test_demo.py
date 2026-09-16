@@ -1,6 +1,7 @@
 """Тесты demo.py: моковые позиции, парсинг и заполнение истории."""
 from meshtrack.demo import (
     TRACKER_IDS,
+    TRACKER_NAMES,
     DemoWorker,
     demo_base_point,
     format_json,
@@ -31,6 +32,14 @@ def test_position_at_moves():
     p1 = position_at("boon101", t_ref + 100, t_ref)
     p2 = position_at("boon101", t_ref + 160, t_ref)
     assert (p1["lat"], p1["lon"]) != (p2["lat"], p2["lon"])
+
+
+def test_position_at_has_names():
+    t_ref = local_midnight()
+    assert set(TRACKER_NAMES) == set(TRACKER_IDS)
+    for tracker_id in TRACKER_IDS:
+        pos = position_at(tracker_id, t_ref + 60, t_ref)
+        assert pos["name"] == TRACKER_NAMES[tracker_id]
 
 
 def test_format_json_roundtrip_parser():

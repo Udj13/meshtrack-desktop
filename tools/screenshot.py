@@ -4,9 +4,12 @@
     .venv/bin/python tools/screenshot.py
 
 Результат:
-    site/assets/img/main.png    — карта с трекерами и панель трекеров
-    site/assets/img/popup.png   — попап трекера
+    site/assets/img/main.webp   — карта с трекерами и панель трекеров
+    site/assets/img/popup.webp  — попап трекера
     site/assets/img/maps.png    — диалог «Управление картами»
+
+Скриншоты с картой сохраняются в WebP (1800 px по ширине) — PNG с детальной
+картой весит больше мегабайта, что для лендинга избыточно.
 """
 import sys
 from pathlib import Path
@@ -15,19 +18,26 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QTimer  # noqa: E402
+from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from meshtrack.app import MainWindow  # noqa: E402
 from meshtrack.map_dialog import MapManagerDialog  # noqa: E402
+from meshtrack.mapscheme import register_map_scheme  # noqa: E402
 
 OUT_DIR = ROOT / "site" / "assets" / "img"
 MAIN_DELAY_MS = 14_000  # ждём загрузку веб-карты и первые позиции демо
 STEP_MS = 1_500
+WEBP_MAX_WIDTH = 1800
+WEBP_QUALITY = 82
 
 
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Схема map:// должна быть зарегистрирована до создания QApplication,
+    # иначе тайлы оффлайн-карты не отрисуются (как в meshtrack/__main__.py).
+    register_map_scheme()
 
     app = QApplication(sys.argv)
     win = MainWindow(demo=True)
@@ -39,15 +49,21 @@ def main() -> int:
     def grab(name: str, widget=None):
         app.processEvents()
         widget = widget or win
-        ok = widget.grab().save(str(OUT_DIR / name))
+        pix = widget.grab()
+        if name.endswith(".webp"):
+            if pix.width() > WEBP_MAX_WIDTH:
+                pix = pix.scaledToWidth(WEBP_MAX_WIDTH, Qt.SmoothTransformation)
+            ok = pix.save(str(OUT_DIR / name), "WEBP", WEBP_QUALITY)
+        else:
+            ok = pix.save(str(OUT_DIR / name))
         print(("saved " if ok else "FAILED ") + str(OUT_DIR / name))
 
     def shot_main():
-        grab("main.png")
+        grab("main.webp")
 
     def shot_popup():
         win.web.page().runJavaScript('centerTracker("boon101")')
-        QTimer.singleShot(STEP_MS, lambda: (grab("popup.png"), shot_maps()))
+        QTimer.singleShot(STEP_MS, lambda: (grab("popup.webp"), shot_maps()))
 
     def shot_maps():
         dlg = MapManagerDialog(

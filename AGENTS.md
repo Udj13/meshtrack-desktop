@@ -63,7 +63,7 @@ LoRa-приёмник (USB-UART)
 | `assets/web/` | Фронт карты: `index.html`, `app.js`, Leaflet локально. |
 | `meshtrack/mapstore.py`, `mapscheme.py` | MBTiles-хранилище и доставка тайлов по `map://`. |
 | `meshtrack/downloader.py`, `map_manager.py`, `map_dialog.py`, `regions.py`, `first_run_wizard.py` | Скачивание тайлов, управление картами, встроенные регионы, мастер первого запуска. |
-| `meshtrack/demo.py` | Демо-режим (`--demo` / `MESHTRACK_DEMO=1`): `DemoWorker`, `format_json()`, заполнение истории. |
+| `meshtrack/demo.py` | Демо-режим (`--demo` / `MESHTRACK_DEMO=1`): `DemoWorker`, `format_json()`, заполнение истории, имена трекеров (`TRACKER_NAMES`). |
 | `meshtrack/publisher.py` | Traccar: очередь + retry; при `enable=False` — no-op. |
 | `meshtrack/exporter.py`, `settings.py`, `logutil.py`, `licenses.py`, `licenses_dialog.py` | Экспорт GPX/CSV, `config.json`, логирование, лицензии. |
 | `tools/fake_serial.py` | Генератор тестовых JSON-пакетов (сценарии static/circle/climb/descend/sos). |

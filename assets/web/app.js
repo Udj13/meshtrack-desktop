@@ -158,7 +158,7 @@ function updateMarker(pos) {
         visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
     }</a>`;
     const popupHtml = `
-        <b>${id}</b><br>
+        <b>${pos.name || id}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${id})</span>` : ""}<br>
         Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
         Курс: ${course !== null ? course + "°" : "—"}<br>
         Высота: ${alt} м<br>

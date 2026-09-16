@@ -204,10 +204,12 @@ class TrackerPanel(QWidget):
             if stale is None:
                 stale = is_stale(ts)
 
+            label = str(pos.get("name") or tracker_id)
+
             chip = QTableWidgetItem()
             chip.setBackground(QColor(color))
             chip.setFlags(chip.flags() & ~Qt.ItemIsSelectable)
-            chip.setToolTip(f"Цвет трекера {tracker_id}")
+            chip.setToolTip(f"Цвет трекера {label}")
 
             age_text = format_age(ts)
             if stale:
@@ -216,9 +218,13 @@ class TrackerPanel(QWidget):
             if stale:
                 age_item.setForeground(QColor("#808080"))
 
+            name_item = QTableWidgetItem(label)
+            if pos.get("name"):
+                name_item.setToolTip(f"ID: {tracker_id}")
+
             items = [
                 chip,
-                QTableWidgetItem(str(tracker_id)),
+                name_item,
                 QTableWidgetItem(f"{gs_f:.1f}" if gs_f is not None else "—"),
                 QTableWidgetItem(f"{course_f:.0f}°" if course_f is not None else "—"),
                 QTableWidgetItem(
