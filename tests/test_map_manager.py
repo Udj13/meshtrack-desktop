@@ -1,4 +1,7 @@
 """Тесты meshtrack/map_manager.py (headless)."""
+
+import gc
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -19,7 +22,9 @@ from meshtrack.mapstore import MapStore
 from meshtrack.settings import Settings
 
 
-def _make_mbtiles(path: Path, complete: bool = True, zmin: int = 9, zmax: int = 15) -> MapStore:
+def _make_mbtiles(
+    path: Path, complete: bool = True, zmin: int = 9, zmax: int = 15
+) -> MapStore:
     store = MapStore(path)
     store.set_metadata("name", path.stem)
     store.set_metadata("format", "png")
@@ -29,7 +34,19 @@ def _make_mbtiles(path: Path, complete: bool = True, zmin: int = 9, zmax: int = 
         store.set_metadata("complete", "1")
     store.set_minmax_zoom(zmin, zmax)
     store.insert(zmin, 1, 1, b"tile-data")
+    _checkpoint_release(path)
     return store
+
+
+def _checkpoint_release(path: Path) -> None:
+    """Финализирует WAL, чтобы Windows не держал файлы заблокированными."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+        del conn
+        gc.collect()
 
 
 def _corrupt(path: Path) -> None:
@@ -115,9 +132,7 @@ def test_scan_prebuilt_not_downloaded(tmp_path: Path):
     maps_dir.mkdir()
     cfg = Settings(tmp_path / "config.json")
 
-    entry = next(
-        e for e in scan_maps(cfg, maps_dir) if e.map_id == "lyambir_airfield"
-    )
+    entry = next(e for e in scan_maps(cfg, maps_dir) if e.map_id == "lyambir_airfield")
     assert entry.source == "prebuilt"
     assert entry.status == NOT_DOWNLOADED
     assert entry.exists is False
@@ -130,9 +145,7 @@ def test_scan_prebuilt_with_file(tmp_path: Path):
     _make_mbtiles(file)
 
     cfg = Settings(tmp_path / "config.json")
-    entry = next(
-        e for e in scan_maps(cfg, maps_dir) if e.map_id == "lyambir_airfield"
-    )
+    entry = next(e for e in scan_maps(cfg, maps_dir) if e.map_id == "lyambir_airfield")
     assert entry.source == "prebuilt"
     assert entry.status == DOWNLOADED
 

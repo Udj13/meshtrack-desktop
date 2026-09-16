@@ -3,9 +3,12 @@
 Чистый от Qt слой: сканирование карт, статусы, удаление.
 Используется UI-диалогом (map_dialog.py) и приложением (app.py).
 """
+
 from __future__ import annotations
 
+import gc
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,8 +61,7 @@ class MapEntry:
 
     def __repr__(self) -> str:
         return (
-            f"MapEntry({self.map_id!r}, status={self.status!r}, "
-            f"source={self.source!r})"
+            f"MapEntry({self.map_id!r}, status={self.status!r}, source={self.source!r})"
         )
 
 
@@ -143,8 +145,12 @@ def scan_maps(settings: Settings, maps_dir: str | Path) -> list[MapEntry]:
                     path=path,
                     source=SOURCE_PREBUILT if prebuilt else SOURCE_DISK,
                     extra=(
-                        {"south": prebuilt.south, "north": prebuilt.north,
-                         "west": prebuilt.west, "east": prebuilt.east}
+                        {
+                            "south": prebuilt.south,
+                            "north": prebuilt.north,
+                            "west": prebuilt.west,
+                            "east": prebuilt.east,
+                        }
                         if prebuilt
                         else {}
                     ),
@@ -162,8 +168,12 @@ def scan_maps(settings: Settings, maps_dir: str | Path) -> list[MapEntry]:
                 name=region.name,
                 path=path,
                 source=SOURCE_PREBUILT,
-                extra={"south": region.south, "north": region.north,
-                       "west": region.west, "east": region.east},
+                extra={
+                    "south": region.south,
+                    "north": region.north,
+                    "west": region.west,
+                    "east": region.east,
+                },
             )
         )
 
@@ -247,9 +257,36 @@ def map_bbox(entry: MapEntry) -> tuple[float, float, float, float] | None:
         return None
 
 
+def _release_wal_locks(path: Path) -> None:
+    """WAL-checkpoint снимает файловые лока Windows на .mbtiles/-shm/-wal.
+
+    SQLite в WAL-режиме оставляет открытыми handles на основной файл и
+    sidecar-файлы даже после закрытия соединений; на Windows это блокирует
+    unlink (WinError 32). TRUNCATE-checkpoint корректно финализирует WAL;
+    удаление Python-обёртки sqlite3.Connection + gc обязательны, иначе
+    handle остаётся закреплённым за объектом.
+    """
+    if not path.is_file():
+        return
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+        del conn
+        gc.collect()
+        time.sleep(0.1)
+    except sqlite3.Error:
+        pass
+    except Exception:
+        logger.exception("WAL-checkpoint не удался для %s", path)
+
+
 def delete_map_file(path: str | Path) -> None:
     """Удаляет .mbtiles и sidecars (-wal, -shm) с ретраем для Windows."""
     path = Path(path)
+    _release_wal_locks(path)
     targets = [path, Path(f"{path}-wal"), Path(f"{path}-shm")]
     for target in targets:
         for attempt in range(3):
