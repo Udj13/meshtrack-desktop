@@ -112,7 +112,8 @@ MeshTrack desktop/
 │  └─ ... модули по таблице выше
 ├─ assets/
 │  └─ web/               # index.html, app.js, leaflet.(js|css) локально, icons
-├─ tools/                # fake_serial.py, download_region.py
+├─ site/                 # лендинг проекта (статический HTML; см. §15)
+├─ tools/                # fake_serial.py, download_region.py, screenshot.py
 ├─ tests/
 └─ installer/            # PyInstaller spec, inno/dmg скрипты (git-ignored вывод)
 ```
@@ -345,6 +346,22 @@ python tools/download_region.py --region lyambir_airfield --out ~/MeshTrack/maps
 
 Git workflow: каждая фаза завершается `git commit` + `git push` (remote
 GitHub); сообщение вида `phase-N: <короткое имя>`.
+
+## 15. Лендинг (`site/`)
+
+Статический одностраничный сайт на русском языке для передачи клиенту
+(«что это такое», как работает, что нужно, ссылки на скачивание, быстрый
+старт). Без фреймворков и внешних ресурсов — все стили/скрипты/картинки
+локальные.
+
+- **Пересъёмка скриншотов:** `tools/screenshot.py` запускает приложение в
+  демо-режиме (центр берётся из активной карты — нужны скачанные MBTiles) и
+  сохраняет `site/assets/img/{main,popup,maps}.png` через `QWidget.grab()`.
+  После пересъёмки картинки проверяются вручную.
+- **Деплой:** Cloudflare Pages (бесплатно, работает с приватным репозиторием;
+  корень = `site/`). GitHub Pages требует публичный репо или платный Pro.
+  Инструкция и TODO (публикация установщиков в GitHub Releases, иначе ссылки
+  «Скачать» ведут на пустую страницу) — в `site/README.md`.
 
 ## 14. Глоссарий
 

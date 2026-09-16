@@ -68,6 +68,8 @@ LoRa-приёмник (USB-UART)
 | `meshtrack/exporter.py`, `settings.py`, `logutil.py`, `licenses.py`, `licenses_dialog.py` | Экспорт GPX/CSV, `config.json`, логирование, лицензии. |
 | `tools/fake_serial.py` | Генератор тестовых JSON-пакетов (сценарии static/circle/climb/descend/sos). |
 | `tools/download_region.py` | CLI: скачивание области → MBTiles. |
+| `tools/screenshot.py` | Пересъёмка скриншотов лендинга: демо-режим + `QWidget.grab()` → `site/assets/img/`. |
+| `site/` | Лендинг проекта (статический HTML, RU). Деплой и TODO — в `site/README.md` (§15 PROJECT.md). |
 
 ## Тесты и команды
 

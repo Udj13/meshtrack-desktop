@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeshTrack Desktop — живой трекинг планеров и парапланеристов</title>
+<meta name="description" content="Оффлайн-приложение для живого трекинга планеров и парапланеристов: LoRa-приёмник по USB, топографическая карта, курс, скорость, высота, тренд набора/снижения, история полётов.">
+<link rel="icon" type="image/png" href="assets/img/favicon.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site-header" id="top">
+  <nav class="nav container">
+    <a class="brand" href="#top">
+      <img src="assets/img/favicon.png" alt="" width="28" height="28">
+      <span>MeshTrack&nbsp;Desktop</span>
+    </a>
+    <button class="nav-toggle" id="nav-toggle" aria-label="Меню" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#how">Как работает</a></li>
+      <li><a href="#features">Возможности</a></li>
+      <li><a href="#requirements">Что нужно</a></li>
+      <li><a href="#download">Скачать</a></li>
+      <li><a href="#quickstart">Быстрый старт</a></li>
+      <li><a href="#contacts">Контакты</a></li>
+    </ul>
+  </nav>
+</header>
+
+<section class="hero">
+  <div class="container">
+    <p class="hero-tag">Полностью оффлайн · Windows и macOS</p>
+    <h1>Живой трекинг планеров и парапланеристов<br>на топографической карте</h1>
+    <p class="hero-sub">
+      MeshTrack Desktop показывает позиции летателей в реальном времени:
+      курс, скорость, высоту и тренд набора/снижения — прямо на ноутбуке
+      в поле, без интернета и облаков.
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#download">Скачать приложение</a>
+      <a class="btn btn-ghost" href="#how">Как это работает</a>
+    </div>
+    <figure class="hero-shot">
+      <img src="assets/img/main.png"
+           alt="Главное окно MeshTrack: карта с маркерами летателей и панель трекеров справа"
+           loading="eager" width="2560" height="1340">
+      <figcaption>Главное окно: карта с маркерами летателей и панель трекеров справа</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <div class="container">
+    <h2>Как это работает</h2>
+    <p class="section-sub">Никакого интернета и серверов — всё передаётся по радиоканалу и показывается локально.</p>
+
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <h3>Трекер у летателя</h3>
+        <p>Небольшое устройство на LoRa-радиомодуле: GPS-координаты, высота, заряд батареи, кнопка SOS. Отправляет пакеты по радиоканалу.</p>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <h3>USB-приёмник</h3>
+        <p>LoRa-приёмник подключается к ноутбуку по USB (UART, 115200 бод) и передаёт принятые пакеты в приложение.</p>
+      </div>
+      <div class="flow-arrow" aria-hidden="true">→</div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <h3>Приложение на ноутбуке</h3>
+        <p>MeshTrack Desktop парсит телеметрию, считает скорость, курс и варио, рисует позиции на топографической карте и сохраняет историю.</p>
+      </div>
+    </div>
+
+    <figure class="shot">
+      <img src="assets/img/popup.png"
+           alt="Попап трекера: скорость, курс, высота, варио, заряд батареи"
+           loading="lazy" width="2560" height="1340">
+      <figcaption>Клик по маркеру — попап с полной телеметрией: скорость, курс, высота, варио, заряд</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section section-alt" id="features">
+  <div class="container">
+    <h2>Возможности</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>Маркеры с трендом</h3>
+        <p>Каждый летатель — цветной маркер с ▲ набором / ▼ снижением, стрелкой курса (длина = скорость) и индикатором устаревания данных.</p>
+      </div>
+      <div class="card">
+        <h3>Панель трекеров</h3>
+        <p>Сводка по всем устройствам: скорость, высота, тренд, заряд, время последнего пакета. Клик — центрировать карту, двойной клик — показать/скрыть трек.</p>
+      </div>
+      <div class="card">
+        <h3>Сигнал SOS</h3>
+        <p>При тревоге маркер пульсирует красным — пропустить невозможно.</p>
+      </div>
+      <div class="card">
+        <h3>Оффлайн-карты</h3>
+        <p>Топографические карты (OpenTopoMap) качаются один раз в виде файла области и работают без интернета сколько угодно.</p>
+      </div>
+      <div class="card">
+        <h3>История и экспорт</h3>
+        <p>Все позиции хранятся локально в SQLite. Фильтр «Сегодня/Вчера/Период», экспорт треков в GPX и CSV.</p>
+      </div>
+      <div class="card">
+        <h3>Демо-режим</h3>
+        <p>Не подключили приёмник? Запустите с демо-данными и посмотрите, как всё работает, прямо сейчас.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="requirements">
+  <div class="container">
+    <h2>Что нужно для работы</h2>
+    <div class="two-col">
+      <div>
+        <h3>Комплект</h3>
+        <ul class="checklist">
+          <li>LoRa-трекеры у летателей (GPS + передатчик на радиомодуле).</li>
+          <li>USB-приёмник LoRa с драйвером UART (например, CP2102, 115200 бод).</li>
+          <li>Ноутбук: <strong>Windows 10/11 x64</strong> или <strong>macOS 12+</strong> (Intel и Apple Silicon).</li>
+          <li>Один раз — интернет, чтобы скачать карту области (дальше всё оффлайн).</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Что шлёт трекер</h3>
+        <p>Приёмник печатает одну JSON-строку на пакет — приложение понимает именно такой формат:</p>
+        <pre class="code"><code>{"device_id":123,"lat":54.12345,"lon":45.67890,"alt":1230,
+ "datetime":"2026-09-16T12:01:00","sos":0,"battery_pct":87,
+ "battery_mv":4020,"rssi":"-27.00dBm","snr":"5.25dB",
+ "ttl":3,"crc":241}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section-alt" id="download">
+  <div class="container">
+    <h2>Скачать</h2>
+    <p class="section-sub">Установка — это один файл: скачать и запустить. Никаких Python, IDE и настроек.</p>
+    <div class="download-grid">
+      <a class="btn btn-primary btn-big" href="https://github.com/Udj13/meshtrack-desktop/releases" target="_blank" rel="noopener">
+        Windows 10/11&nbsp;— установщик&nbsp;.exe
+      </a>
+      <a class="btn btn-primary btn-big" href="https://github.com/Udj13/meshtrack-desktop/releases" target="_blank" rel="noopener">
+        macOS 12+&nbsp;— образ&nbsp;.dmg
+      </a>
+    </div>
+    <p class="note">Сборки не подписаны: на Windows — «Подробнее&nbsp;→&nbsp;Выполнить», на macOS — правой кнопкой «Открыть».</p>
+  </div>
+</section>
+
+<section class="section" id="quickstart">
+  <div class="container">
+    <h2>Быстрый старт: 3 шага</h2>
+    <ol class="steps">
+      <li><strong>Установите приложение</strong> — запустите установщик для своей ОС.</li>
+      <li><strong>Подключите приёмник</strong> к ноутбуку по USB и включите трекеры.</li>
+      <li><strong>Скачайте карту области</strong> — при первом запуске мастер предложит готовые регионы (аэродромы Лямбирь, Напольная Тавла, Сосновка, Никольское) или произвольную область.</li>
+    </ol>
+    <figure class="shot">
+      <img src="assets/img/maps.png"
+           alt="Диалог управления картами: статусы загрузки, размер, число тайлов"
+           loading="lazy" width="1840" height="960">
+      <figcaption>Диалог «Управление картами»: статусы, докачка, подключение и удаление областей</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section section-alt" id="contacts">
+  <div class="container">
+    <h2>Контакты</h2>
+    <p class="section-sub">Вопросы, предложения, заказ оборудования — пишите автору:</p>
+    <p class="contacts">
+      Евгений Шлягин ·
+      <a href="mailto:shlyagin@gmail.com">shlyagin@gmail.com</a> ·
+      <a href="https://github.com/Udj13/meshtrack-desktop" target="_blank" rel="noopener">репозиторий на GitHub</a>
+    </p>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>© 2026 MeshTrack Desktop · Евгений Шлягин</p>
+    <p class="attribution">Карты: © OpenStreetMap contributors (ODbL), SRTM · © OpenTopoMap (CC-BY-SA)</p>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
