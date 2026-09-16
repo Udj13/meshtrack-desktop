@@ -1,17 +1,14 @@
 """Serial-ридер в отдельном QThread.
 
-Собирает текстовые блоки между маркерами `Radio Received packet!` и
-`Postfix: OK` / `Received valid LoRa data packet!`, парсит их и испускает
-сигналы для основного потока.
+Читает поток построчно и парсит JSON-строки пакетов (по одной на пакет),
+испуская сигналы для основного потока.
 """
 import serial
 from PySide6.QtCore import QThread, Signal
 
 from .parser import (
-    is_end_marker,
-    is_start_marker,
     is_valid_position,
-    parse_data,
+    parse_packet,
     parse_queue_size,
 )
 
@@ -54,9 +51,6 @@ class SerialWorker(QThread):
             self._running = False
             return
 
-        buffer: list[str] = []
-        in_block = False
-
         while self._running:
             try:
                 data = self._ser.readline()
@@ -87,20 +81,9 @@ class SerialWorker(QThread):
             if qs is not None:
                 self.queue_size.emit(qs)
 
-            if is_start_marker(line):
-                buffer = [line]
-                in_block = True
-                continue
-
-            if in_block:
-                buffer.append(line)
-                if is_end_marker(line):
-                    block = "\n".join(buffer)
-                    parsed = parse_data(block)
-                    if is_valid_position(parsed):
-                        self.position.emit(parsed)
-                    in_block = False
-                    buffer = []
+            parsed = parse_packet(line)
+            if parsed is not None and is_valid_position(parsed):
+                self.position.emit(parsed)
 
         if self._ser is not None:
             try:

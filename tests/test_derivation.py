@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from meshtrack.derivation import derive, haversine_m, bearing_deg
-from meshtrack.parser import parse_data
+from meshtrack.parser import parse_packet
 
 # Базовая точка как в tools/fake_serial.py
 BASE_LAT = 54.4000
@@ -15,10 +15,11 @@ CEN_ALT = 500.0
 
 
 def _points_from_blocks(blocks: list[str], step_s: float = 2.0) -> list[tuple]:
-    """Превращает текстовые блоки fake_serial в точки derivation."""
+    """Превращает JSON-строки fake_serial в точки derivation."""
     pts: list[tuple[float, float, float, float | None]] = []
     for i, block in enumerate(blocks):
-        p = parse_data(block)
+        p = parse_packet(block)
+        assert p is not None
         lat = float(p["lat"])
         lon = float(p["lon"])
         alt = float(p["altitude"]) if "altitude" in p else None

@@ -10,6 +10,7 @@ MainWindow через те же обработчики.
 """
 from __future__ import annotations
 
+import json
 import math
 import time
 from datetime import datetime, timezone
@@ -29,19 +30,6 @@ TICK_S = 2.0
 SEED_STEP_S = 15.0
 
 TRACKER_IDS = ("boon101", "boon102", "boon103", "boon104")
-
-_BLOCK_TMPL = """Radio Received packet!
-Device ID: {dev}
-Latitude: {lat:.5f}
-Longitude: {lon:.5f}
-Altitude: {alt}
-Date/Time: {dt}
-SOS: {sos}
-Battery Voltage: {volt}
-Battery Level: {batt}%
-Postfix: OK
-Queue size: {q}
-"""
 
 
 def local_midnight(ts: float | None = None) -> float:
@@ -135,22 +123,25 @@ def position_at(
     }
 
 
-def format_block(pos: dict, queue_size: int = 3) -> str:
-    """Формирует legacy-текст пакета (для сигнала raw_line и лога)."""
+def format_json(pos: dict) -> str:
+    """Формирует JSON-строку пакета в формате реального устройства."""
     dt = datetime.fromtimestamp(pos["device_ts"], timezone.utc).strftime(
-        "%Y-%m-%d %H:%M:%S"
+        "%Y-%m-%dT%H:%M:%S"
     )
-    return _BLOCK_TMPL.format(
-        dev=pos["id"].removeprefix("boon"),
-        lat=pos["lat"],
-        lon=pos["lon"],
-        alt=pos["altitude"],
-        dt=dt,
-        sos=pos["sos"],
-        volt=pos["voltage"],
-        batt=pos["batt"],
-        q=queue_size,
-    )
+    return json.dumps({
+        "device_id": int(pos["id"].removeprefix("boon")),
+        "lat": pos["lat"],
+        "lon": pos["lon"],
+        "alt": pos["altitude"],
+        "datetime": dt,
+        "sos": pos["sos"],
+        "battery_pct": pos["batt"],
+        "battery_mv": pos["voltage"],
+        "rssi": "-27.00dBm",
+        "snr": "5.25dB",
+        "ttl": 3,
+        "crc": 241,
+    }, ensure_ascii=False)
 
 
 def seed_demo_history(
@@ -240,7 +231,7 @@ class DemoWorker(QThread):
                 pos = position_at(
                     tracker_id, now, t_ref, self.base_lat, self.base_lon
                 )
-                for line in format_block(pos, queue_size).splitlines():
+                for line in format_json(pos).splitlines():
                     self.raw_line.emit(line)
                 self.position.emit(pos)
             tick += 1

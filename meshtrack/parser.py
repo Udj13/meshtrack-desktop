@@ -1,48 +1,95 @@
-"""Чистый парсер LoRa-пакетов (перенесён из main.py без изменений логики).
+"""Чистый парсер JSON-пакетов LoRa-приёмника.
+
+Устройство печатает по одной JSON-строке на принятый пакет:
+
+    {"device_id":1,"lat":54.211205,"lon":45.158203,"alt":168,
+     "datetime":"2026-09-16T12:01:00","sos":0,"battery_pct":100,
+     "battery_mv":4150,"rssi":"-27.00dBm","snr":"5.25dB","ttl":3,"crc":241}
 
 Не имеет зависимостей Qt/serial, можно тестировать headless.
 """
+import json
 import re
 from datetime import datetime, timezone
 
-# Маркеры начала/конца блока данных (как в main.py)
-START_MARKERS = ("Radio Received packet!",)
-END_MARKERS = ("Postfix: OK", "Received valid LoRa data packet!")
 
-_PATTERNS = {
-    'id': r'Device ID:\s+(\d+)',
-    'lat': r'Latitude:\s+([-\d.]+)',
-    'lon': r'Longitude:\s+([-\d.]+)',
-    'altitude': r'Altitude:\s+(\d+)',
-    'datetime': r'Date/Time:\s+([\d-]+\s+[\d:]+)',
-    'sos': r'SOS:\s+(\d+)',
-    'voltage': r'Battery Voltage:\s+(\d+)',
-    'batt': r'Battery Level:\s+(\d+)%',
-}
+def _to_float(value) -> float | None:
+    """Приводит число или строку вида '-27.00dBm' к float."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = re.search(r'[-+]?\d+(?:\.\d+)?', str(value))
+    return float(m.group()) if m else None
 
 
-def parse_data(data_block: str) -> dict:
-    """Парсит блок и возвращает dict (id → 'boon{id}', timestamp ISO).
+def _to_int(value) -> int | None:
+    """Приводит число или строку к int (None при ошибке)."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
-    Возвращает {} если ни одно поле не найдено.
+
+def parse_packet(line: str) -> dict | None:
+    """Парсит JSON-строку пакета в dict формата приложения.
+
+    Возвращает None, если строка не JSON-объект или в ней нет
+    обязательных полей device_id/lat/lon.
     """
-    params = {}
-    for key, pat in _PATTERNS.items():
-        m = re.search(pat, data_block)
-        if m:
-            params[key] = m.group(1)
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        obj = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    if "device_id" not in obj or "lat" not in obj or "lon" not in obj:
+        return None
 
-    if 'datetime' in params:
+    params: dict = {}
+
+    device_id = obj.get("device_id")
+    if device_id is not None:
+        params["id"] = f"boon{device_id}"
+
+    for src, dst in (
+        ("lat", "lat"),
+        ("lon", "lon"),
+        ("alt", "altitude"),
+        ("battery_pct", "batt"),
+        ("battery_mv", "voltage"),
+    ):
+        value = _to_float(obj.get(src))
+        if value is not None:
+            params[dst] = value
+
+    sos = _to_int(obj.get("sos"))
+    if sos is not None:
+        params["sos"] = sos
+
+    for src in ("ttl", "crc"):
+        value = _to_int(obj.get(src))
+        if value is not None:
+            params[src] = value
+
+    for src in ("rssi", "snr"):
+        value = _to_float(obj.get(src))
+        if value is not None:
+            params[src] = value
+
+    dt_str = obj.get("datetime")
+    if dt_str:
         try:
-            dt = datetime.strptime(params['datetime'], '%Y-%m-%d %H:%M:%S')
-            params['timestamp'] = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-            params['device_ts'] = dt.replace(tzinfo=timezone.utc).timestamp()
-            del params['datetime']
+            dt = datetime.strptime(str(dt_str), '%Y-%m-%dT%H:%M:%S')
+            params["timestamp"] = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+            params["device_ts"] = dt.replace(tzinfo=timezone.utc).timestamp()
         except ValueError:
-            params['timestamp'] = 'N/A'
-
-    if 'id' in params:
-        params['id'] = f"boon{params['id']}"
+            params["timestamp"] = 'N/A'
 
     return params
 
@@ -69,11 +116,3 @@ def is_valid_position(params: dict) -> bool:
     except (TypeError, ValueError):
         pass  # alt опционален
     return 'id' in params
-
-
-def is_start_marker(line: str) -> bool:
-    return any(m in line for m in START_MARKERS)
-
-
-def is_end_marker(line: str) -> bool:
-    return any(m in line for m in END_MARKERS)

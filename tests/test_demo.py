@@ -3,12 +3,12 @@ from meshtrack.demo import (
     TRACKER_IDS,
     DemoWorker,
     demo_base_point,
-    format_block,
+    format_json,
     local_midnight,
     position_at,
     seed_demo_history,
 )
-from meshtrack.parser import is_valid_position, parse_data
+from meshtrack.parser import is_valid_position, parse_packet
 from meshtrack.repository import Repository
 
 
@@ -33,16 +33,19 @@ def test_position_at_moves():
     assert (p1["lat"], p1["lon"]) != (p2["lat"], p2["lon"])
 
 
-def test_format_block_roundtrip_parser():
+def test_format_json_roundtrip_parser():
     t_ref = local_midnight()
     pos = position_at("boon101", t_ref + 120, t_ref)
-    parsed = parse_data(format_block(pos))
+    parsed = parse_packet(format_json(pos))
     assert is_valid_position(parsed)
     assert parsed["id"] == "boon101"
     assert parsed["device_ts"] == pos["device_ts"]
-    assert float(parsed["lat"]) == pos["lat"]
-    assert float(parsed["lon"]) == pos["lon"]
-    assert int(parsed["altitude"]) == pos["altitude"]
+    assert parsed["lat"] == pos["lat"]
+    assert parsed["lon"] == pos["lon"]
+    assert parsed["altitude"] == pos["altitude"]
+    assert parsed["sos"] == pos["sos"]
+    assert parsed["batt"] == pos["batt"]
+    assert parsed["voltage"] == pos["voltage"]
 
 
 def test_demo_base_point_prebuilt():

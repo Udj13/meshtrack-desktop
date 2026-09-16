@@ -8,14 +8,15 @@
   descend  — снижение −2 м/с (тренд ▼)
   sos      — всплеск SOS=1
 
-Вывод — текстовый поток в стиле UART: пары блоков “Radio Received packet!” …
-“Postfix: OK”. По умолчанию пишет в stdout; --output FILE — в файл.
+Вывод — JSON-строки в формате реального устройства (по одной на пакет).
+По умолчанию пишет в stdout; --output FILE — в файл.
 
 Примеры:
   python tools/fake_serial.py --scenario climb --output /tmp/f.txt
   python tools/fake_serial.py --scenario sos --count 3
 """
 import argparse
+import json
 import math
 import sys
 import time
@@ -25,25 +26,22 @@ BASE_LAT = 54.4000
 BASE_LON = 45.4000
 CEN_ALT = 500.0      # м — старт высоты
 
-_BLOCK_TMPL = """Radio Received packet!
-Device ID: {dev}
-Latitude: {lat:.5f}
-Longitude: {lon:.5f}
-Altitude: {alt}
-Date/Time: 2026-09-10 12:{mm:02d}:{ss:02d}
-SOS: {sos}
-Battery Voltage: {volt}
-Battery Level: {batt}%
-Postfix: OK
-Queue size: {q}
-"""
-
 
 def _fmt_block(i, lat, lon, alt, sos=0, volt=4020, batt=87, q=3):
-    return _BLOCK_TMPL.format(
-        dev=1, lat=lat, lon=lon, alt=int(alt), mm=(i // 60) % 60, ss=i % 60,
-        sos=sos, volt=volt, batt=batt, q=q,
-    )
+    return json.dumps({
+        "device_id": 1,
+        "lat": round(lat, 5),
+        "lon": round(lon, 5),
+        "alt": int(alt),
+        "datetime": f"2026-09-10T12:{i // 60:02d}:{i % 60:02d}",
+        "sos": sos,
+        "battery_pct": batt,
+        "battery_mv": volt,
+        "rssi": "-27.00dBm",
+        "snr": "5.25dB",
+        "ttl": 3,
+        "crc": 241,
+    }, ensure_ascii=False)
 
 
 def scenario_static(count):
@@ -104,7 +102,7 @@ def main():
     out = open(args.output, "w") if args.output else sys.stdout
     try:
         for blk in gen:
-            out.write(blk)
+            out.write(blk + "\n")
             out.flush()
             if args.interval:
                 time.sleep(args.interval)
