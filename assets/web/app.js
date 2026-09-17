@@ -219,7 +219,9 @@ function updateMarker(pos) {
         delete arrows[id];
     }
 
-    if (firstPosition) {
+    if (firstPosition && !stale) {
+        // Не прыгаем на устаревшую (восстановленную из истории) позицию:
+        // центрируемся по первым свежим данным.
         map.setView([lat, lon], 13);
         firstPosition = false;
     }
@@ -326,13 +328,10 @@ function refreshVisibleTracks() {
     });
 }
 
-function clearAllTracks() {
-    visibleTracks.forEach(removeTrack);
-    visibleTracks.clear();
-}
-
 function onHistoryCleared() {
-    clearAllTracks();
+    // Стираем старые линии, но НЕ сбрасываем visibleTracks: треки включённых
+    // трекеров продолжают рисоваться по мере поступления новых точек.
+    visibleTracks.forEach(removeTrack);
 }
 
 function onPosition(pos) {
@@ -375,6 +374,19 @@ if (typeof qt !== "undefined") {
                 });
             } else {
                 console.warn("bridge.getActiveMapId not available");
+            }
+            if (bridge.getRestoredPositions) {
+                // Показать известные маркеры сразу, до прихода живых пакетов.
+                bridge.getRestoredPositions(function(jsonStr) {
+                    try {
+                        const arr = JSON.parse(jsonStr);
+                        arr.forEach(function(p) {
+                            onPosition(p);
+                        });
+                    } catch (e) {
+                        console.error("getRestoredPositions parse error:", e);
+                    }
+                });
             }
             if (bridge.activeMapChanged) {
                 bridge.activeMapChanged.connect(function(mapId) {

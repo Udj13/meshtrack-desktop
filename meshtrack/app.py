@@ -3,6 +3,7 @@
 Фаза 1: карта на QtWebEngine + WebChannel + SerialWorker + Repository.
 Фаза 5: диалог настроек (Traccar, serial, retention), экспорт GPX/CSV.
 """
+
 import logging
 import os
 import platform
@@ -94,6 +95,44 @@ def color_for_id(tracker_id: str) -> str:
     return PALETTE[h % len(PALETTE)]
 
 
+def build_restored_positions(
+    repo: Repository,
+    track_history_seconds: int = 600,
+    now: float | None = None,
+) -> list[dict]:
+    """Восстанавливает последние позиции трекеров из истории для старта.
+
+    Берёт все известные tracker_id, для каждого — последнюю позицию (`latest`)
+    и короткий хвост истории для расчёта производных метрик (GS/курс/варио).
+    Трекеры без позиций пропускаются. Возвращает список pos-dict в формате
+    `_handle_position` (без name/color — их добавляет вызывающий код); поле
+    `stale` отражает давность пакета.
+    """
+    now = time.time() if now is None else now
+    restored: list[dict] = []
+    for tracker_id in repo.all_trackers():
+        last = repo.latest(tracker_id)
+        if last is None:
+            continue
+        cache = repo.last_points(tracker_id, seconds=track_history_seconds)
+        pos = {
+            "id": tracker_id,
+            "lat": float(last["lat"]),
+            "lon": float(last["lon"]),
+            "altitude": last["alt"],
+            "batt": last["batt"],
+            "voltage": last["voltage"],
+            "sos": int(last["sos"] or 0),
+            "ts": last["ts"],
+            "recv_ts": last["recv_ts"],
+        }
+        pos.update(derive(cache))
+        pos["stale"] = is_stale(pos["ts"], now)
+        restored.append(pos)
+    restored.sort(key=lambda p: p.get("ts") or 0, reverse=True)
+    return restored
+
+
 def app_data_dir() -> Path:
     """Путь к папке данных приложения (PROJECT.md §8)."""
     system = platform.system()
@@ -131,7 +170,17 @@ class TrackerPanel(QWidget):
     trackerClicked = Signal(str)
     trackerDoubleClicked = Signal(str)
 
-    COLUMNS = ["", "ID", "Скорость", "Курс", "Варио", "Высота", "Заряд", "Напр.", "Обновлён"]
+    COLUMNS = [
+        "",
+        "ID",
+        "Скорость",
+        "Курс",
+        "Варио",
+        "Высота",
+        "Заряд",
+        "Напр.",
+        "Обновлён",
+    ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -232,7 +281,9 @@ class TrackerPanel(QWidget):
                 ),
                 QTableWidgetItem(f"{alt_f:.0f} м" if alt_f is not None else "—"),
                 QTableWidgetItem(f"{batt_f:.0f}%" if batt_f is not None else "—"),
-                QTableWidgetItem(f"{(voltage_f / 1000):.2f} В" if voltage_f is not None else "—"),
+                QTableWidgetItem(
+                    f"{(voltage_f / 1000):.2f} В" if voltage_f is not None else "—"
+                ),
                 age_item,
             ]
             for col, item in enumerate(items):
@@ -327,6 +378,7 @@ class SettingsDialog(QDialog):
     def _detect_ports() -> list[str]:
         try:
             import serial.tools.list_ports
+
             return [p.device for p in serial.tools.list_ports.comports()]
         except Exception:
             return []
@@ -397,7 +449,11 @@ class MainWindow(QMainWindow):
         try:
             purged = self.repo.purge_old(self.settings.retention_days)
             if purged:
-                self.logger.info("Удалено %d старых позиций (retention=%d дней)", purged, self.settings.retention_days)
+                self.logger.info(
+                    "Удалено %d старых позиций (retention=%d дней)",
+                    purged,
+                    self.settings.retention_days,
+                )
         except Exception:
             self.logger.exception("Ошибка очистки старой истории")
 
@@ -431,7 +487,9 @@ class MainWindow(QMainWindow):
         # Кэш последних точек в RAM: 10 минут истории для трека,
         # derivation внутри себя использует окно 60 с
         self._track_history_seconds = 600
-        self._points_cache: dict[str, list[tuple[float, float, float, float | None]]] = {}
+        self._points_cache: dict[
+            str, list[tuple[float, float, float, float | None]]
+        ] = {}
 
         # Последние позиции трекеров — нужны для периодической перерисовки
         # маркеров, когда данные устаревают (без нового пакета)
@@ -458,6 +516,10 @@ class MainWindow(QMainWindow):
         self.channel = QWebChannel(self)
         self.channel.registerObject("bridge", self.bridge)
         page.setWebChannel(self.channel)
+
+        # Восстанавливаем последние позиции из истории: левый список и маркеры
+        # на карте появляются сразу, не дожидаясь живых пакетов.
+        self._restore_trackers_from_history()
 
         # Загрузить index.html
         web_dir = Path(__file__).resolve().parent.parent / "assets" / "web"
@@ -685,13 +747,15 @@ class MainWindow(QMainWindow):
             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_from))
             if ts_from
             else "…",
-            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_to))
-            if ts_to
-            else "…",
+            time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts_to)) if ts_to else "…",
         )
         if total == 0:
-            self.logger.info("Экспорт %s: нет данных за период %s", fmt.upper(), range_str)
-            QMessageBox.information(parent, "Экспорт", "За выбранный период нет данных.")
+            self.logger.info(
+                "Экспорт %s: нет данных за период %s", fmt.upper(), range_str
+            )
+            QMessageBox.information(
+                parent, "Экспорт", "За выбранный период нет данных."
+            )
             return
         self.logger.info(
             "Экспорт %s: период %s, трекеров %d, точек %d",
@@ -728,9 +792,7 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except Exception:
             self.logger.exception("Ошибка сохранения настроек")
-        self.logger.info(
-            "Экспортировано %s: %s (%d точек)", ext.upper(), path, count
-        )
+        self.logger.info("Экспортировано %s: %s (%d точек)", ext.upper(), path, count)
 
     def _on_download_map(self):
         """Открывает wizard для докачки карты."""
@@ -863,6 +925,7 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             try:
                 deleted = self.repo.clear_all_positions()
+                self._points_cache.clear()
                 self.logger.info("История очищена, удалено позиций: %d", deleted)
                 self.bridge.clearHistory()
             except Exception:
@@ -873,6 +936,7 @@ class MainWindow(QMainWindow):
         self.port_combo.clear()
         try:
             import serial.tools.list_ports
+
             ports = [p.device for p in serial.tools.list_ports.comports()]
         except Exception:
             self.logger.exception("Не удалось получить список портов")
@@ -973,7 +1037,9 @@ class MainWindow(QMainWindow):
         self._data_silence_warned = False
         self._data_timer.start()
 
-        self._demo_worker = DemoWorker(base_lat=base_lat, base_lon=base_lon, parent=self)
+        self._demo_worker = DemoWorker(
+            base_lat=base_lat, base_lon=base_lon, parent=self
+        )
         self._attach_worker(self._demo_worker)
 
         self.status_port.setText("Порт: ДЕМО")
@@ -987,9 +1053,7 @@ class MainWindow(QMainWindow):
     def _seed_demo_history(self, base_lat: float, base_lon: float):
         """Фоновое заполнение демо-истории (вызывается из потока)."""
         try:
-            added = seed_demo_history(
-                self.repo, base_lat=base_lat, base_lon=base_lon
-            )
+            added = seed_demo_history(self.repo, base_lat=base_lat, base_lon=base_lon)
             if added:
                 self.logger.info("Демо-история: добавлено %d точек", added)
         except Exception:
@@ -1132,6 +1196,31 @@ class MainWindow(QMainWindow):
     def _update_active_status(self):
         active = self.repo.active_trackers(max_age_s=300)
         self.status_active.setText(f"Активных: {len(active)}")
+
+    def _restore_trackers_from_history(self):
+        """Заполняет левый список и bridge последними позициями из БД.
+
+        Вызывается при старте; маркеры на карте появятся, когда JS заберёт
+        список через getRestoredPositions() после подключения QWebChannel.
+        """
+        try:
+            restored = build_restored_positions(
+                self.repo, track_history_seconds=self._track_history_seconds
+            )
+        except Exception:
+            self.logger.exception("Ошибка восстановления трекеров из истории")
+            return
+        self.bridge.restored_positions = restored
+        for pos in restored:
+            pos["color"] = color_for_id(pos["id"])
+            self._last_positions[pos["id"]] = pos
+            # Сидируем RAM-кэш точками истории, чтобы метрики (GS/курс/варио)
+            # не обнулялись при первом живом пакете после старта.
+            self._points_cache.setdefault(
+                pos["id"],
+                self.repo.last_points(pos["id"], seconds=self._track_history_seconds),
+            )
+            self.tracker_panel.update_tracker(pos)
 
     def _update_map_status(self):
         map_id = self.settings.active_map_id

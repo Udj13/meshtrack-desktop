@@ -5,6 +5,7 @@ Python-сторона принимает позицию и испускает с
 - запрос треков `getTrack` из JS;
 - сигнал/метод `historyCleared` для очистки истории.
 """
+
 import json
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -26,6 +27,9 @@ class WebBridge(QObject):
         super().__init__(parent)
         self._repo = repo
         self._settings = settings
+        # Последние известные позиции (восстановленные из истории при старте).
+        # MainWindow заполняет их до загрузки страницы; JS забирает списком.
+        self.restored_positions: list[dict] = []
 
     @Slot(dict)
     def pushPosition(self, position: dict):
@@ -67,6 +71,15 @@ class WebBridge(QObject):
             return self._settings.default_map_id() or ""
         return active
 
+    @Slot(result=str)
+    def getRestoredPositions(self) -> str:
+        """Возвращает восстановленные из истории позиции трекеров (JSON).
+
+        JS вызывает после подключения QWebChannel, чтобы сразу показать
+        известные маркеры до прихода живых пакетов.
+        """
+        return json.dumps(self.restored_positions)
+
     @Slot(str)
     def setActiveMapId(self, map_id: str):
         """Устанавливает активную карту и уведомляет JS."""
@@ -97,6 +110,7 @@ class WebBridge(QObject):
             return 9, 15
         try:
             from .mapstore import MapStore
+
             store = MapStore(path)
             return store.get_minmax_zoom()
         except Exception:
