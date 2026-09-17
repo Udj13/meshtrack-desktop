@@ -1,4 +1,7 @@
 """Тесты demo.py: моковые позиции, парсинг и заполнение истории."""
+
+import math
+
 from meshtrack.demo import (
     TRACKER_IDS,
     TRACKER_NAMES,
@@ -42,10 +45,39 @@ def test_position_at_has_names():
         assert pos["name"] == TRACKER_NAMES[tracker_id]
 
 
+def test_tracks_are_routes_not_pure_circles():
+    t_ref = local_midnight()
+    # Выборка за несколько циклов маршрута: трек — маршрут с размахом > 1 км,
+    # а не круг на месте.
+    for tracker_id in TRACKER_IDS:
+        lats = []
+        lons = []
+        for i in range(400):
+            pos = position_at(tracker_id, t_ref + 3600 + i * 45.0, t_ref)
+            lats.append(pos["lat"])
+            lons.append(pos["lon"])
+        lat0 = min(lats)
+        cos_lat = math.cos(math.radians(lat0))
+        lat_span = (max(lats) - lat0) * 111_320.0
+        lon_span = (max(lons) - min(lons)) * 111_320.0 * cos_lat
+        assert max(lat_span, lon_span) > 1000.0
+
+
+def test_altitude_varies_on_routes():
+    t_ref = local_midnight()
+    for tracker_id in TRACKER_IDS:
+        alts = [
+            position_at(tracker_id, t_ref + 3600 + i * 30.0, t_ref)["altitude"]
+            for i in range(600)
+        ]
+        assert max(alts) - min(alts) > 100
+
+
 def test_format_json_roundtrip_parser():
     t_ref = local_midnight()
     pos = position_at("boon101", t_ref + 120, t_ref)
     parsed = parse_packet(format_json(pos))
+    assert parsed is not None
     assert is_valid_position(parsed)
     assert parsed["id"] == "boon101"
     assert parsed["device_ts"] == pos["device_ts"]

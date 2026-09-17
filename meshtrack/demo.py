@@ -7,7 +7,11 @@
 `DemoWorker` повторяет интерфейс `SerialWorker` (сигналы position/raw_line/
 error/queue_size, метод stop(), атрибут port), поэтому подключается к
 MainWindow через те же обработчики.
+
+Моковые треки — реалистичные замкнутые маршруты (перегоны между точками +
+короткие термики-круги набора), с плавно меняющейся высотой.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +43,72 @@ TRACKER_NAMES = {
     "boon104": "Параплан",
 }
 
+# Демо-маршруты относительно базовой точки. Нога — ("go", north_м, east_м,
+# высота_м, скорость_км/ч) — прямолинейный перегон между точками маршрута;
+# термик — ("term", north_м, east_м, радиус_м, набор_м, кругов, скорость_км/ч) —
+# короткие круги набора на термальной точке. Маршрут замкнут (последняя нога
+# возвращает к старту), `start_alt` — высота старта/посадки.
+TRACKS: dict[str, dict] = {
+    "boon101": {
+        "name": "АСК-21",
+        "start_alt": 140.0,
+        # «Коробочка» над аэродромом: взлёт, набор, по ветру, траверс, финальный.
+        "plan": [
+            ("go", 0, 1500, 320, 110),
+            ("go", 2200, 1500, 340, 110),
+            ("go", 2200, 0, 340, 100),
+            ("go", 2200, -1100, 300, 95),
+            ("go", 700, -1100, 210, 90),
+            ("go", 0, 0, 140, 85),
+        ],
+    },
+    "boon102": {
+        "name": "Дискус",
+        "start_alt": 200.0,
+        # Треугольный маршрут: длинные перегоны и два термика набора (~1.2 м/с).
+        "plan": [
+            ("go", 1200, 2800, 560, 90),
+            ("term", 1200, 3600, 180, 220, 2.5, 55),
+            ("go", 4400, 2600, 620, 78),
+            ("term", 5000, 2000, 200, 240, 2.5, 55),
+            ("go", 2500, -800, 480, 85),
+            ("term", 2000, -600, 150, 120, 1.5, 50),
+            ("go", 0, 0, 200, 75),
+        ],
+    },
+    "boon103": {
+        "name": "Бланик",
+        "start_alt": 160.0,
+        # Дальний маршрут туда-обратно с термиками у разворотных точек.
+        "plan": [
+            ("go", 1500, 4200, 500, 95),
+            ("term", 1900, 4400, 200, 260, 2.5, 55),
+            ("go", 900, 6800, 560, 85),
+            ("term", 700, 7600, 180, 300, 2.5, 55),
+            ("go", -600, 4200, 500, 88),
+            ("go", -200, 1600, 340, 82),
+            ("go", 0, 0, 170, 78),
+        ],
+    },
+    "boon104": {
+        "name": "Параплан",
+        "start_alt": 210.0,
+        # Медленный маршрут «гребёнка» с подъёмами/снижениями по линии.
+        "plan": [
+            ("go", 400, 2600, 340, 40),
+            ("go", 1400, 3300, 420, 38),
+            ("go", 1800, 2200, 300, 42),
+            ("go", 2900, 2400, 450, 40),
+            ("go", 3300, 1300, 320, 44),
+            ("go", 4200, 1400, 400, 42),
+            ("go", 0, 0, 210, 38),
+        ],
+    },
+}
+
+# Фазы «турбулентности» (шума высоты) — разнести синусоиды по трекерам.
+_WAVE_PHASE = {"boon101": 0.0, "boon102": 1.1, "boon103": 2.3, "boon104": 3.7}
+
 
 def local_midnight(ts: float | None = None) -> float:
     """Локальная полночь для момента ts (unix)."""
@@ -60,7 +130,9 @@ def demo_base_point(settings) -> tuple[float, float]:
     return BASE_LAT, BASE_LON
 
 
-def _offset(lat0: float, lon0: float, north_m: float, east_m: float) -> tuple[float, float]:
+def _offset(
+    lat0: float, lon0: float, north_m: float, east_m: float
+) -> tuple[float, float]:
     cos_lat = math.cos(math.radians(lat0))
     return (
         lat0 + north_m / 111_320.0,
@@ -68,20 +140,67 @@ def _offset(lat0: float, lon0: float, north_m: float, east_m: float) -> tuple[fl
     )
 
 
-def _circle(
-    lat0: float, lon0: float, radius_m: float, speed_kmh: float, t: float, t_ref: float
-) -> tuple[float, float]:
-    """Точка на окружности радиуса radius_m с путевой скоростью speed_kmh."""
-    omega = (speed_kmh / 3.6) / radius_m
-    ang = omega * (t - t_ref)
-    cos_lat = math.cos(math.radians(lat0))
-    return (
-        lat0 + radius_m / 111_320.0 * math.cos(ang),
-        lon0 + radius_m / (111_320.0 * cos_lat) * math.sin(ang),
-    )
+def _route_position(
+    track: dict,
+    t: float,
+    t_ref: float,
+    base_lat: float,
+    base_lon: float,
+) -> tuple[float, float, float]:
+    """Позиция на замкнутом маршруте track в момент t.
+
+    Маршрут раскладывается на ноги с длительностью (дистанция/скорость для
+    перегонов, время кругов для термиков); позиция — интерполяция по фазе
+    ``(t - t_ref) % суммарная_длительность``. Возвращает (lat, lon, alt).
+    """
+    plan = track["plan"]
+    legs: list[tuple[float, tuple, float, float, float]] = []
+    total_dur = 0.0
+    north0 = east0 = 0.0
+    alt0 = track["start_alt"]
+    dh = 0.0
+    for seg in plan:
+        if seg[0] == "go":
+            _, n, e, alt, speed = seg
+            dur = math.hypot(n - north0, e - east0) / (speed / 3.6)
+        else:
+            _, cn, ce, r, dh, rounds, speed = seg
+            dur = rounds * 2.0 * math.pi * r / (speed / 3.6)
+        legs.append((dur, seg, north0, east0, alt0))
+        total_dur += dur
+        if seg[0] == "go":
+            _, n, e, alt, _ = seg
+            north0, east0, alt0 = n, e, alt
+        else:
+            alt0 += dh
+
+    u = (t - t_ref) % total_dur
+    if u >= total_dur - 1e-9:
+        u = 0.0
+    acc = 0.0
+    for dur, seg, n0, e0, a0 in legs:
+        if u < acc + dur:
+            frac = (u - acc) / dur if dur > 0.0 else 0.0
+            if seg[0] == "go":
+                _, n, e, alt_to, _ = seg
+                north = n0 + (n - n0) * frac
+                east = e0 + (e - e0) * frac
+                alt = a0 + (alt_to - a0) * frac
+            else:
+                _, cn, ce, r, dh, rounds, _ = seg
+                ang = 2.0 * math.pi * rounds * frac
+                north = cn + r * math.cos(ang)
+                east = ce + r * math.sin(ang)
+                alt = a0 + dh * frac
+            lat, lon = _offset(base_lat, base_lon, north, east)
+            return lat, lon, alt
+        acc += dur
+    raise AssertionError("не найдена нога маршрута")
 
 
-def _battery(t: float, t_ref: float, start: float = 92.0, drain_per_hour: float = 3.0) -> float:
+def _battery(
+    t: float, t_ref: float, start: float = 92.0, drain_per_hour: float = 3.0
+) -> float:
     return max(15.0, min(100.0, start - (t - t_ref) / 3600.0 * drain_per_hour))
 
 
@@ -93,26 +212,10 @@ def position_at(
     base_lon: float = BASE_LON,
 ) -> dict:
     """Позиция трекера на момент t (unix) в формате парсера."""
-    if tracker_id == "boon101":
-        # «Термик»: круг 250 м на 45 км/ч, высота 650±350 м (период 8 мин)
-        lat, lon = _circle(base_lat, base_lon, 250.0, 45.0, t, t_ref)
-        alt = 650.0 + 350.0 * math.sin(2 * math.pi * (t - t_ref) / 480.0)
-    elif tracker_id == "boon102":
-        # «Маршрут»: круг 3 км в 3 км севернее, 70 км/ч, высота 1200±400 м
-        clat, clon = _offset(base_lat, base_lon, 3000.0, 0.0)
-        lat, lon = _circle(clat, clon, 3000.0, 70.0, t, t_ref)
-        alt = 1200.0 + 400.0 * math.sin(2 * math.pi * (t - t_ref) / 900.0)
-    elif tracker_id == "boon103":
-        # «Набор»: спираль 120 м, набор +1.5 м/с (400…2200 м)
-        slat, slon = _offset(base_lat, base_lon, -500.0, 500.0)
-        lat, lon = _circle(slat, slon, 120.0, 35.0, t, t_ref)
-        alt = 400.0 + ((t - t_ref) * 1.5) % 1800.0
-    elif tracker_id == "boon104":
-        # «На земле»: медленное движение по площадке (12 км/ч), периодический SOS
-        lat, lon = _circle(base_lat, base_lon, 150.0, 12.0, t, t_ref)
-        alt = 140.0
-    else:
-        raise KeyError(tracker_id)
+    track = TRACKS[tracker_id]
+    lat, lon, alt = _route_position(track, t, t_ref, base_lat, base_lon)
+    # «Турбулентность»: небольшой периодический шум высоты (живой варио/тренд).
+    alt += 15.0 * math.sin((t + _WAVE_PHASE[tracker_id]) * (2.0 * math.pi / 37.0))
 
     batt = _battery(t, t_ref)
     sos = 1 if tracker_id == "boon104" and (t - t_ref) % 180 < 20 else 0
@@ -137,20 +240,23 @@ def format_json(pos: dict) -> str:
     dt = datetime.fromtimestamp(pos["device_ts"], timezone.utc).strftime(
         "%Y-%m-%dT%H:%M:%S"
     )
-    return json.dumps({
-        "device_id": int(pos["id"].removeprefix("boon")),
-        "lat": pos["lat"],
-        "lon": pos["lon"],
-        "alt": pos["altitude"],
-        "datetime": dt,
-        "sos": pos["sos"],
-        "battery_pct": pos["batt"],
-        "battery_mv": pos["voltage"],
-        "rssi": "-27.00dBm",
-        "snr": "5.25dB",
-        "ttl": 3,
-        "crc": 241,
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "device_id": int(pos["id"].removeprefix("boon")),
+            "lat": pos["lat"],
+            "lon": pos["lon"],
+            "alt": pos["altitude"],
+            "datetime": dt,
+            "sos": pos["sos"],
+            "battery_pct": pos["batt"],
+            "battery_mv": pos["voltage"],
+            "rssi": "-27.00dBm",
+            "snr": "5.25dB",
+            "ttl": 3,
+            "crc": 241,
+        },
+        ensure_ascii=False,
+    )
 
 
 def seed_demo_history(
@@ -172,9 +278,7 @@ def seed_demo_history(
     # Пропускаем, если в текущем дне уже есть свежие точки (например,
     # приложение перезапустили, а демо-история уже заполнена).
     try:
-        recent = repo.points(
-            tracker_ids[0], ts_from=max(day0, now - 300.0), ts_to=now
-        )
+        recent = repo.points(tracker_ids[0], ts_from=max(day0, now - 300.0), ts_to=now)
     except Exception:
         recent = []
     if len(recent) >= 10:
@@ -237,9 +341,7 @@ class DemoWorker(QThread):
             now = time.time()
             queue_size = 2 + tick % 5
             for tracker_id in TRACKER_IDS:
-                pos = position_at(
-                    tracker_id, now, t_ref, self.base_lat, self.base_lon
-                )
+                pos = position_at(tracker_id, now, t_ref, self.base_lat, self.base_lon)
                 for line in format_json(pos).splitlines():
                     self.raw_line.emit(line)
                 self.position.emit(pos)
