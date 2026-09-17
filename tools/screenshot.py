@@ -1,16 +1,21 @@
-"""Снимки окна приложения в демо-режиме для лендинга (site/assets/img/).
+"""Снимки окна приложения в демо-режиме для сайта проекта.
 
 Запуск:
-    .venv/bin/python tools/screenshot.py
+    .venv/bin/python tools/screenshot.py [--output DIR]
 
-Результат:
-    site/assets/img/main.webp   — карта с трекерами и панель трекеров
-    site/assets/img/popup.webp  — попап трекера
-    site/assets/img/maps.png    — диалог «Управление картами»
+Результат (по умолчанию — site/assets/img/ в корне репозитория):
+    main.webp   — карта с трекерами и панель трекеров
+    popup.webp  — попап трекера
+    maps.png    — диалог «Управление картами»
 
 Скриншоты с картой сохраняются в WebP (1800 px по ширине) — PNG с детальной
-картой весит больше мегабайта, что для лендинга избыточно.
+картой весит больше мегабайта, что для веба избыточно.
+
+Требования: скачанные карты (центр демо берётся из активной карты в
+config.json) и схема map://, зарегистрированная до создания QApplication
+(иначе тайлы не отрисуются).
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -25,7 +30,6 @@ from meshtrack.app import MainWindow  # noqa: E402
 from meshtrack.map_dialog import MapManagerDialog  # noqa: E402
 from meshtrack.mapscheme import register_map_scheme  # noqa: E402
 
-OUT_DIR = ROOT / "site" / "assets" / "img"
 MAIN_DELAY_MS = 14_000  # ждём загрузку веб-карты и первые позиции демо
 STEP_MS = 1_500
 WEBP_MAX_WIDTH = 1800
@@ -33,7 +37,15 @@ WEBP_QUALITY = 82
 
 
 def main() -> int:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    ap = argparse.ArgumentParser(prog="tools/screenshot.py")
+    ap.add_argument(
+        "--output",
+        default=str(ROOT / "site" / "assets" / "img"),
+        help="Каталог для скриншотов (по умолчанию site/assets/img в корне репо)",
+    )
+    args = ap.parse_args()
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # Схема map:// должна быть зарегистрирована до создания QApplication,
     # иначе тайлы оффлайн-карты не отрисуются (как в meshtrack/__main__.py).
@@ -53,10 +65,10 @@ def main() -> int:
         if name.endswith(".webp"):
             if pix.width() > WEBP_MAX_WIDTH:
                 pix = pix.scaledToWidth(WEBP_MAX_WIDTH, Qt.SmoothTransformation)
-            ok = pix.save(str(OUT_DIR / name), "WEBP", WEBP_QUALITY)
+            ok = pix.save(str(out_dir / name), "WEBP", WEBP_QUALITY)
         else:
-            ok = pix.save(str(OUT_DIR / name))
-        print(("saved " if ok else "FAILED ") + str(OUT_DIR / name))
+            ok = pix.save(str(out_dir / name))
+        print(("saved " if ok else "FAILED ") + str(out_dir / name))
 
     def shot_main():
         grab("main.webp")
