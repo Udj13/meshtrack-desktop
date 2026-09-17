@@ -82,8 +82,8 @@ JSON-строки приёмника, табличный legacy-формат н�
 | `meshtrack/serial_worker.py` | QThread: открытие порта, построчное чтение, `position(dict)` из JSON-строк. |
 | `meshtrack/derivation.py` | По истории точек считает GS (geometry-ema), курс (bearing), варио (Δalt/Δt). |
 | `meshtrack/repository.py` | SQLite: `positions`, `trackers`; append; запросы по фильтрам. |
-| `meshtrack/mapstore.py` | Работа с MBTiles: создание, вставка тайлов, чтение, verify. |
-| `meshtrack/downloader.py` | Скачивание тайлов по bbox/zooms с rate-limit, resume, прогрессом. |
+| `meshtrack/mapstore.py` | Работа с MBTiles: создание, вставка тайлов, чтение, verify; «битые» тайлы (не PNG — html-ошибки сервера) считаются отсутствующими и обнаруживаются verify. |
+| `meshtrack/downloader.py` | Скачивание тайлов по bbox/zooms с rate-limit, resume, прогрессом; отбрасывает ответы HTTP 200 с не-PNG телом (html-страницы ошибок/rate-limit) и пережидает их. |
 | `meshtrack/regions.py` | Встроенные регионы (bbox по трём аэродромам), пользовательские bbox. |
 | `meshtrack/webbridge.py` | QObject-мост Python↔JS (QWebChannel): positions, tracks, config. |
 | `meshtrack/publisher.py` | TraccarPublisher: очередь + retry; при `enable=False` — no-op (см. §11). |
@@ -93,7 +93,7 @@ JSON-строки приёмника, табличный legacy-формат н�
 | `meshtrack/settings.py` | `config.json`: traccar_on, слои, palette, retention, serial prefs. |
 | `meshtrack/map_manager.py` | Headless-логика карт (без Qt): сканирование, статусы, удаление файлов. |
 | `meshtrack/map_dialog.py` | Диалог «Управление картами»: список, статусы, действия (докачка, удаление, подключение). |
-| `meshtrack/demo.py` | Демо-режим (`--demo` / `MESHTRACK_DEMO=1`): `DemoWorker` с моковыми позициями и заполнение истории; человекочитаемые имена трекеров (`TRACKER_NAMES`: АСК-21, Дискус, Бланик, Параплан); отдельная БД, по умолчанию выключен. |
+| `meshtrack/demo.py` | Демо-режим (`--demo` / `MESHTRACK_DEMO=1`): `DemoWorker` с моковыми позициями и заполнение истории; моковые треки — реалистичные замкнутые маршруты (`TRACKS`: перегоны + короткие термики, меняющаяся высота); человекочитаемые имена трекеров (`TRACKER_NAMES`: АСК-21, Дискус, Бланик, Параплан); отдельная БД, по умолчанию выключен. |
 | `tools/fake_serial.py` | Генератор сценариев для тестов (см. §10). |
 | `tools/download_region.py` | CLI скачивания области → MBTiles. |
 
@@ -233,11 +233,17 @@ MeshTrack desktop/
 - **Доставка в Leaflet:** приложение регистрирует scheme `map`; URL
   `map://{map_id}/{z}/{x}/{y}.png` → `MapSchemeHandler` (потомок
   `QWebEngineUrlSchemeHandler`) читает BLOB из MBTiles; при отсутствии —
-  1×1 прозрачный PNG­-заглушка.
+  1×1 прозрачный PNG-заглушка. Тайл, содержимое которого не является PNG
+  (например, html-страница ошибки тайл-сервера, попавшая в старую карту),
+  в рендер не отдаётся — считается отсутствующим (серое поле).
 - **Скачивание:** перв-запуск мастер (список предопределённых регионов или
   произвольный bbox через мини-карту), потоковый downloader с rate-limit
   (≥ 200 мс между запросами), resume (чек-point в config), прогресс по
-  файлу-мапе. Регион «город» ≈ 50–150 МБ (z 9–15).
+  файлу-мапе. Регион «город» ≈ 50–150 МБ (z 9–15). HTTP 200 с не-PNG телом
+  (rate-limit/WAF, вернувшие html вместо картинки) в карту не записывается:
+  ответ пережидается с backoff, при повторных неудачах тайл помечается
+  упавшим. Resume не пропускает уже сохранённые не-PNG тайлы — повторная
+  докачка/перекачка их починит.
 - **Встроенные регионы** (координаты `regions.py`, **уточнить у заказчика**):
 
 | id map | Регион | S–N (lat) | W–E (lon) |

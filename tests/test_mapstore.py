@@ -1,9 +1,10 @@
 """Тесты meshtrack/mapstore.py (headless, без Qt)."""
+
 from pathlib import Path
 
 import pytest
 
-from meshtrack.mapstore import MapStore
+from meshtrack.mapstore import PNG_MAGIC, MapStore, is_valid_tile_blob
 
 
 @pytest.fixture
@@ -49,7 +50,7 @@ def test_metadata(store: MapStore):
 
 
 def test_verify_ok(store: MapStore):
-    store.insert(10, 1, 1, b"tile")
+    store.insert(10, 1, 1, PNG_MAGIC + b"\x00" * 64)
     report = store.verify()
     assert report["ok"] is True
     assert report["tile_count"] == 1
@@ -86,3 +87,26 @@ def test_minmax_zoom_fallback_to_tiles(store: MapStore):
 
 def test_minmax_zoom_default_when_empty(store: MapStore):
     assert store.get_minmax_zoom(default_zmin=5, default_zmax=20) == (5, 20)
+
+
+def test_is_valid_tile_blob():
+    assert is_valid_tile_blob(PNG_MAGIC + b"data") is True
+    assert is_valid_tile_blob(b"<!DOCTYPE html><html></html>") is False
+    assert is_valid_tile_blob(b"") is False
+    assert is_valid_tile_blob(None) is False
+    assert is_valid_tile_blob(b"\x89PNG") is False  # неполная сигнатура
+
+
+def test_has_needs_valid_png(store: MapStore):
+    store.insert(10, 1, 1, b"<!DOCTYPE html>")  # «битый» тайл
+    assert store.has(10, 1, 1) is False
+    store.insert(10, 1, 1, PNG_MAGIC + b"\x00" * 32)
+    assert store.has(10, 1, 1) is True
+
+
+def test_verify_reports_invalid_tiles(store: MapStore):
+    store.insert(10, 1, 1, PNG_MAGIC + b"\x00" * 32)  # валидный
+    store.insert(10, 1, 2, b"<!DOCTYPE html>")  # битый
+    report = store.verify()
+    assert report["ok"] is False
+    assert any("non-PNG" in e for e in report["errors"])

@@ -1,4 +1,5 @@
 """Тесты meshtrack/downloader.py с локальным HTTP-сервером (headless)."""
+
 import http.server
 import threading
 from pathlib import Path
@@ -13,19 +14,82 @@ from meshtrack.downloader import (
     estimate_tile_count,
     tile_range_for_bbox,
 )
-from meshtrack.mapstore import MapStore
+from meshtrack.mapstore import PNG_MAGIC, MapStore
 
 FAKE_PNG = bytes(
     [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
-        0x54, 0x08, 0xD7, 0x63, 0x60, 0x60, 0x60, 0x60,
-        0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05,
-        0xFE, 0xD4, 0x6A, 0xE6, 0x00, 0x00, 0x00, 0x00,
-        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        0x89,
+        0x50,
+        0x4E,
+        0x47,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
+        0x00,
+        0x00,
+        0x00,
+        0x0D,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x08,
+        0x06,
+        0x00,
+        0x00,
+        0x00,
+        0x1F,
+        0x15,
+        0xC4,
+        0x89,
+        0x00,
+        0x00,
+        0x00,
+        0x0D,
+        0x49,
+        0x44,
+        0x41,
+        0x54,
+        0x08,
+        0xD7,
+        0x63,
+        0x60,
+        0x60,
+        0x60,
+        0x60,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
+        0x00,
+        0x01,
+        0x00,
+        0x05,
+        0xFE,
+        0xD4,
+        0x6A,
+        0xE6,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x49,
+        0x45,
+        0x4E,
+        0x44,
+        0xAE,
+        0x42,
+        0x60,
+        0x82,
     ]
 )
 
@@ -57,6 +121,67 @@ def http_server():
 @pytest.fixture
 def store(tmp_path: Path) -> MapStore:
     return MapStore(tmp_path / "dl.mbtiles")
+
+
+class HtmlErrorHandler(http.server.BaseHTTPRequestHandler):
+    """Всегда отвечает 200 + html-страница ошибки (как rate-limit у WAF)."""
+
+    def do_GET(self):
+        body = b"<!DOCTYPE html><html><body>Too Many Requests</body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+class RetryThenPngHandler(http.server.BaseHTTPRequestHandler):
+    """Первый запрос каждого тайла — html, следующие — PNG."""
+
+    hits = {}
+
+    def do_GET(self):
+        path = self.path
+        n = RetryThenPngHandler.hits.get(path, 0)
+        RetryThenPngHandler.hits[path] = n + 1
+        if n == 0:
+            body = b"<!DOCTYPE html>"
+            ctype = "text/html"
+        else:
+            body = FAKE_PNG
+            ctype = "image/png"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+@pytest.fixture(scope="module")
+def html_server():
+    server = http.server.HTTPServer(("127.0.0.1", 0), HtmlErrorHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    server.shutdown()
+
+
+@pytest.fixture()
+def retry_server():
+    RetryThenPngHandler.hits = {}
+    server = http.server.HTTPServer(("127.0.0.1", 0), RetryThenPngHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    server.shutdown()
 
 
 def test_tile_range_for_bbox():
@@ -126,6 +251,7 @@ def test_tile_downloader_rate_limit(store: MapStore, http_server: str):
     dl = TileDownloader(store, http_server, rate_limit=0.05)
     z, x, y, data = dl._download_one(10, 512, 256)
     assert data == FAKE_PNG
+    assert data is not None
     store.insert(z, x, y, data)
     assert store.get(z, x, y) == FAKE_PNG
 
@@ -139,3 +265,28 @@ def test_format_size():
 def test_format_time():
     assert _format_time(45) == "45 с"
     assert _format_time(90) == "1 мин 30 с"
+
+
+def test_download_rejects_html_200(store: MapStore, html_server: str):
+    """HTTP 200 с html-телом (ошибка/rate-limit) не должен попадать в MBTiles."""
+    bbox = (54.0, 54.01, 45.0, 45.01)
+    result = download(store, bbox, html_server, zmin=10, zmax=10, workers=1)
+    assert result["downloaded"] == 0
+    assert result["failed"] > 0
+    assert store.count() == 0
+
+
+def test_download_retries_invalid_200_then_png(store: MapStore, retry_server: str):
+    """Первый html-ответ пережидается, со второго — валидный PNG сохраняется."""
+    bbox = (54.0, 54.01, 45.0, 45.01)
+    result = download(store, bbox, retry_server, zmin=10, zmax=10, workers=1)
+    assert result["failed"] == 0
+    assert result["downloaded"] > 0
+    assert store.count() == result["downloaded"]
+    tiles = store.list_tiles(10)
+    assert tiles
+    z, x, y = tiles[0]
+    data = store.get(z, x, y)
+    assert data == FAKE_PNG
+    assert data is not None
+    assert data[:8] == PNG_MAGIC

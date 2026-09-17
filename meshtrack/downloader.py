@@ -8,6 +8,7 @@
 - progress callback (downloaded, total);
 - отмену через threading.Event.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +20,7 @@ from typing import Callable
 
 import requests
 
-from .mapstore import MapStore
+from .mapstore import MapStore, is_valid_tile_blob
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +121,26 @@ class TileDownloader:
             try:
                 resp = self._session.get(url, timeout=30)
                 if resp.status_code == 200:
+                    if not is_valid_tile_blob(resp.content):
+                        # HTTP 200, но тело — не PNG (html-страница ошибки/
+                        # rate-limit от прокси). Такое в хранилище писать нельзя.
+                        logger.warning(
+                            "HTTP 200, но ответ не PNG (%d байт) для %s, попытка %d",
+                            len(resp.content),
+                            url,
+                            attempts + 1,
+                        )
+                        time.sleep(backoff)
+                        backoff *= 2
+                        attempts += 1
+                        continue
                     return z, x, y, resp.content
                 if resp.status_code == 429 or resp.status_code >= 500:
                     logger.warning(
-                        "HTTP %d для %s, попытка %d", resp.status_code, url, attempts + 1
+                        "HTTP %d для %s, попытка %d",
+                        resp.status_code,
+                        url,
+                        attempts + 1,
                     )
                     time.sleep(backoff)
                     backoff *= 2

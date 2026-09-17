@@ -18,7 +18,7 @@ from meshtrack.map_manager import (
     map_bbox,
     scan_maps,
 )
-from meshtrack.mapstore import MapStore
+from meshtrack.mapstore import PNG_MAGIC, MapStore
 from meshtrack.settings import Settings
 
 
@@ -33,7 +33,7 @@ def _make_mbtiles(
     if complete:
         store.set_metadata("complete", "1")
     store.set_minmax_zoom(zmin, zmax)
-    store.insert(zmin, 1, 1, b"tile-data")
+    store.insert(zmin, 1, 1, PNG_MAGIC + b"tile-data")
     _checkpoint_release(path)
     return store
 

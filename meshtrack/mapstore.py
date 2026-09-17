@@ -9,11 +9,27 @@ Tile_row в MBTiles использует схему TMS (y отсчитывае�
 веб-карты используют XYZ (y сверху). Методы insert/get делают преобразование
 автоматически, получая/отдавая координаты в формате XYZ.
 """
+
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 from typing import Iterable
+
+# Сигнатура PNG (первые 8 байт любого PNG-файла).
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def is_valid_tile_blob(data: bytes | bytearray | None) -> bool:
+    """True, если blob — валидный PNG-тайл.
+
+    Отделяет настоящие тайлы от «битых»: html-страниц ошибок (429/200 waf),
+    пустых ответов и т.п., которые иногда приходят от тайл-серверов и не
+    должны попадать в MBTiles.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        return False
+    return bytes(data[:8]) == PNG_MAGIC
 
 
 class MapStore:
@@ -113,7 +129,9 @@ class MapStore:
         self.set_metadata("minzoom", str(int(zmin)))
         self.set_metadata("maxzoom", str(int(zmax)))
 
-    def get_minmax_zoom(self, default_zmin: int = 9, default_zmax: int = 15) -> tuple[int, int]:
+    def get_minmax_zoom(
+        self, default_zmin: int = 9, default_zmax: int = 15
+    ) -> tuple[int, int]:
         """Возвращает (minzoom, maxzoom) из metadata или вычисляет из tiles."""
         zmin_str = self.get_metadata("minzoom")
         zmax_str = self.get_metadata("maxzoom")
@@ -144,8 +162,13 @@ class MapStore:
             return r[0] if r else None
 
     def has(self, z: int, x: int, y: int) -> bool:
-        """True, если тайл уже есть в хранилище."""
-        return self.get(z, x, y) is not None
+        """True, если по адресу лежит валидный PNG-тайл.
+
+        Для resume загрузки: тайлы с некорректным содержимым (например,
+        HTML-страницы ошибок) считаются отсутствующими и перекачиваются.
+        """
+        data = self.get(z, x, y)
+        return data is not None and is_valid_tile_blob(data)
 
     def count(self) -> int:
         with self._connect() as conn:
@@ -175,7 +198,12 @@ class MapStore:
                 }
                 if "metadata" not in tables or "tiles" not in tables:
                     errors.append("missing required tables")
-                    return {"ok": False, "tile_count": 0, "metadata": {}, "errors": errors}
+                    return {
+                        "ok": False,
+                        "tile_count": 0,
+                        "metadata": {},
+                        "errors": errors,
+                    }
 
                 meta = {
                     name: value
@@ -187,8 +215,18 @@ class MapStore:
                 nulls = conn.execute(
                     "SELECT COUNT(*) FROM tiles WHERE tile_data IS NULL"
                 ).fetchone()[0]
+                invalid = conn.execute(
+                    "SELECT COUNT(*) FROM tiles "
+                    "WHERE tile_data IS NOT NULL AND substr(tile_data, 1, 8) != ?",
+                    (PNG_MAGIC,),
+                ).fetchone()[0]
                 if nulls:
                     errors.append(f"{nulls} tiles with NULL tile_data")
+                if invalid:
+                    errors.append(
+                        f"{invalid} tiles with non-PNG data "
+                        "(HTML/ошибка сервера) — перекачайте карту"
+                    )
                 return {
                     "ok": len(errors) == 0,
                     "tile_count": count,

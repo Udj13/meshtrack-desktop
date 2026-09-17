@@ -18,7 +18,7 @@ from PySide6.QtWebEngineCore import (
     QWebEngineUrlSchemeHandler,
 )
 
-from .mapstore import MapStore
+from .mapstore import MapStore, is_valid_tile_blob
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,14 @@ class MapSchemeHandler(QWebEngineUrlSchemeHandler):
 
         if data is None:
             logger.debug("Tile miss: %s z=%d x=%d y=%d", map_id, z, x, y)
+            self._reply(job, TRANSPARENT_PNG, b"image/png")
+        elif not is_valid_tile_blob(data):
+            # В старой/битой карте может лежать html вместо PNG — в рендер
+            # не отдаём: декодер Chromium такое не переваривает → серые тайлы.
+            logger.warning(
+                "Tile не PNG (повреждён): %s z=%d x=%d y=%d (%d байт) — перекачайте карту",
+                map_id, z, x, y, len(data),
+            )
             self._reply(job, TRANSPARENT_PNG, b"image/png")
         else:
             logger.debug("Tile hit: %s z=%d x=%d y=%d (%d bytes)", map_id, z, x, y, len(data))
