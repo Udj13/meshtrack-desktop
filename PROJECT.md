@@ -290,6 +290,16 @@ Retention: по умолчанию хранить 90 дней; настройк�
 `bridge.getRestoredPositions()` — маркеры появляются сразу, до прихода живых
 пакетов; устаревшие (>20 мин) помечаются `stale`.
 
+Удаление одного трекера (`repo.delete_tracker`): кнопка «✕» в списке трекеров
+с подтверждением удаляет все позиции устройства и его запись из `trackers`;
+маркер и трек убираются с карты (`removeTracker` в JS).
+
+Псевдонимы трекеров: колонка `trackers.name` (задаётся кнопкой «✎» в списке,
+QInputDialog; пустое значение + подтверждение снимает псевдоним). Уникальный
+ID показывается рядом с псевдонимом в панели и попапе (`name (id)`).
+Пользовательский псевдоним имеет приоритет над именем из демо-режима;
+псевдонимы восстанавливаются при старте вместе с позициями.
+
 ## 10. Тестовая инфраструктура
 
 `tools/fake_serial.py` — генератор сценариев: выдаёт JSON-строки (формат
@@ -313,6 +323,39 @@ Retention: по умолчанию хранить 90 дней; настройк�
 - Выключен → `enqueue()` — no-op, ни одного сетевого запроса (тест Фазы 5).
 
 ## 12. Сборка и дистрибуция
+
+### Windows — одним проходом
+
+Требования:
+
+```text
+Python-виртуальное окружение с `requirements.txt` (в нём есть pyinstaller)
+Inno Setup 6 (ISCC.exe), например:  %LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe
+```
+
+Пошагово (обе команды — из корня репозитория).
+
+```bash
+# 1. PyInstaller (onedir) → dist\MeshTrack\
+.venv\Scripts\python.exe -m PyInstaller --noconfirm installer/win/MeshTrack.spec
+
+# 2. Inno Setup 6 → installer\win\output\MeshTrackSetup-<версия>.exe
+#    ISCC запускать из installer\win (пути/OutputDir в setup.iss относительны),
+#    если ISCC не в PATH — указать полный путь.
+"C:\Users\<user>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" setup.iss
+```
+
+Подводные камни (по опыту сборки 0.1.0):
+
+- **Сжатие долгое.** LZMA2-сжатие бандла QtWebEngine занимает **~10 минут**,
+  терминал «висит» на `Compressing: ...Qt6WebEngine*.dll` — это не зависание,
+  ждать до `Successful compile`. Не прерывать процессы по короткому таймауту.
+- Версия инсталлятора задаётся в `setup.iss` (`#define MyAppVersion`) — поднять
+  перед выпуском. `OutputDir=output` → результат в `installer/win/output/`.
+- Не-PNG-тайлы/карты в поставку не входят, пользователь качает регион в
+  мастере первого запуска.
+
+### Платформы и прочее
 
 - PyInstaller (onedir):
   - Windows → `installer/win/MeshTrack.spec` + Inno Setup script `setup.iss`
@@ -354,6 +397,8 @@ MESHTRACK_DEMO=1 python -m meshtrack  # то же через переменну�
 pytest -q                           # тесты
 python tools/fake_serial.py --scenario climb --output /tmp/fake.txt
 python tools/download_region.py --region lyambir_airfield --out ~/MeshTrack/maps/lyambir.mbtiles
+.venv\Scripts\python.exe -m PyInstaller --noconfirm installer/win/MeshTrack.spec
+"${LOCALAPPDATA}\\Programs\\Inno Setup 6\\ISCC.exe" setup.iss   # из installer/win
 ```
 
 Git workflow: каждая фаза завершается `git commit` + `git push` (remote

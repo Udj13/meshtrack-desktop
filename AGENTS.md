@@ -79,6 +79,13 @@ LoRa-приёмник (USB-UART)
 .venv/bin/python tools/fake_serial.py --scenario circle --count 5 --output /tmp/f.txt
 ```
 
+Сборка под Windows (инструкции и подводные камни — PROJECT.md §12):
+
+```bash
+.venv/Scripts/python.exe -m PyInstaller --noconfirm installer/win/MeshTrack.spec
+"$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe" setup.iss   # из installer/win
+```
+
 - Тесты headless: парсер/derivation/repository — без Qt; `SerialWorker`
   тестируется через `file://`-источник; GUI-тесты не требуются.
 - Приёмник реального устройства: `/dev/cu.usbserial-0001`, 115200 baud,
