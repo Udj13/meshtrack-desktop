@@ -12,16 +12,16 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 
 class WebBridge(QObject):
-    """QObject-мост, опубликованный в QWebChannel под именем `bridge`."""
+    """Мост Python↔JS (QWebChannel).
 
-    # Сигнал Python → JS. JS подключается через bridge.positionReceived.connect(...)
+    pushPosition — приём/выдача позиции; trackShown — сигнал о смене
+    видимости трека (вызывается из JS).
+    """
+
     positionReceived = Signal(dict)
-
-    # Сигнализирует, что история позиций была очищена.
     historyCleared = Signal()
-
-    # Сигнализирует о смене активной карты (id для map://).
     activeMapChanged = Signal(str)
+    trackShown = Signal(str, bool)
 
     def __init__(self, repo=None, settings=None, parent=None):
         super().__init__(parent)
@@ -35,6 +35,11 @@ class WebBridge(QObject):
     def pushPosition(self, position: dict):
         """JS может вызывать bridge.pushPosition(pos) — пробрасываем дальше."""
         self.positionReceived.emit(position)
+
+    @Slot(str, bool)
+    def setTrackShown(self, tracker_id: str, shown: bool):
+        """JS сообщает о переключении видимости трека (для индикатора)."""
+        self.trackShown.emit(tracker_id, shown)
 
     @Slot(str, float, float, result=str)
     def getTrack(self, tracker_id: str, ts_from: float, ts_to: float) -> str:

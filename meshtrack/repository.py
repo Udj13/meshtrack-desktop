@@ -2,6 +2,7 @@
 
 Использует WAL и минимальную схему, описанную в PROJECT.md §9.
 """
+
 import sqlite3
 import time
 from pathlib import Path
@@ -73,9 +74,7 @@ class Repository:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
         if "recv_ts" not in cols:
             conn.execute("ALTER TABLE positions ADD COLUMN recv_ts REAL")
-            conn.execute(
-                "UPDATE positions SET recv_ts = ts WHERE recv_ts IS NULL"
-            )
+            conn.execute("UPDATE positions SET recv_ts = ts WHERE recv_ts IS NULL")
 
     def add_position(
         self,
@@ -156,10 +155,34 @@ class Repository:
     def all_trackers(self) -> list[str]:
         """Все известные tracker_id."""
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT id FROM trackers ORDER BY id"
-            ).fetchall()
+            rows = conn.execute("SELECT id FROM trackers ORDER BY id").fetchall()
             return [r["id"] for r in rows]
+
+    def tracker_names(self) -> dict[str, str]:
+        """Все псевдонимы трекеров: {tracker_id: name} (без пустых)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, name FROM trackers WHERE name IS NOT NULL AND name != ''"
+            ).fetchall()
+            return {r["id"]: r["name"] for r in rows}
+
+    def get_tracker_name(self, tracker_id: str) -> str | None:
+        """Псевдоним трекера или None."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT name FROM trackers WHERE id = ?", (tracker_id,)
+            ).fetchone()
+            return row["name"] if row else None
+
+    def set_tracker_name(self, tracker_id: str, name: str | None) -> None:
+        """Задаёт/обновляет псевдоним трекера; None/пусто — снимает."""
+        name = (name or "").strip()
+        value: str | None = name or None
+        with self._connect() as conn:
+            conn.execute("INSERT OR IGNORE INTO trackers(id) VALUES (?)", (tracker_id,))
+            conn.execute(
+                "UPDATE trackers SET name = ? WHERE id = ?", (value, tracker_id)
+            )
 
     def points(
         self,
@@ -182,7 +205,7 @@ class Repository:
             params.append(ts_to)
 
         sql = f"""SELECT ts, lat, lon, alt, batt, voltage, sos FROM positions
-                  WHERE {' AND '.join(where)}
+                  WHERE {" AND ".join(where)}
                   ORDER BY ts ASC"""
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
@@ -215,3 +238,17 @@ class Repository:
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM positions")
             return cur.rowcount
+
+    def delete_tracker(self, tracker_id: str) -> int:
+        """Удаляет все позиции и запись трекера.
+
+        Возвращает количество удалённых позиций; запись в `trackers` удаляется
+        всегда (даже если позиций не было).
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM positions WHERE tracker_id = ?", (tracker_id,)
+            )
+            deleted = cur.rowcount
+            conn.execute("DELETE FROM trackers WHERE id = ?", (tracker_id,))
+        return deleted

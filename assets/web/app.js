@@ -110,6 +110,7 @@ const arrows = {};
 const trackLayers = {};
 const visibleTracks = new Set();
 const lastTrackReload = {};
+const lastPos = {};
 let firstPosition = true;
 
 // Как часто (мс) обновлять трек видимого трекера при поступлении новых точек.
@@ -133,19 +134,14 @@ function makeArrowHtml(color, lengthPx, courseDeg, stale) {
         transform:rotate(${rotate}deg);"></div>`;
 }
 
-function updateMarker(pos) {
+function buildPopupHtml(pos) {
     const id = pos.id;
-    if (!id) return;
-    const color = pos.color || colorForId(id);
-    const lat = parseFloat(pos.lat);
-    const lon = parseFloat(pos.lon);
     const alt = pos.altitude !== undefined && pos.altitude !== null ? pos.altitude : "—";
     const batt = pos.batt !== undefined && pos.batt !== null ? pos.batt + "%" : "—";
     const volt = pos.voltage !== undefined && pos.voltage !== null ? (pos.voltage / 1000).toFixed(2) + " В" : "—";
     const sos = pos.sos === 1 || pos.sos === "1";
     const stale = Boolean(pos.stale);
     const ts = pos.ts || (Date.now() / 1000);
-
     const trend = pos.trend || "—";
     const gs = pos.gs_kmh !== undefined && pos.gs_kmh !== null ? pos.gs_kmh.toFixed(1) : null;
     const course = pos.course_deg !== undefined && pos.course_deg !== null ? pos.course_deg.toFixed(0) : null;
@@ -157,7 +153,7 @@ function updateMarker(pos) {
     const trackLink = `<a href="#" onclick="event.preventDefault(); toggleTrack('${id}'); return false;">${
         visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
     }</a>`;
-    const popupHtml = `
+    return `
         <b>${pos.name || id}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${id})</span>` : ""}<br>
         Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
         Курс: ${course !== null ? course + "°" : "—"}<br>
@@ -169,6 +165,32 @@ function updateMarker(pos) {
         ${staleHtml}
         <br>${trackLink}
     `;
+}
+
+function refreshMarkerPopup(id) {
+    // Пересобираем попап (например, после включения/выключения трека), не закрывая его.
+    if (markers[id] && lastPos[id]) {
+        markers[id].setPopupContent(buildPopupHtml(lastPos[id]));
+    }
+}
+
+function updateMarker(pos) {
+    const id = pos.id;
+    if (!id) return;
+    lastPos[id] = pos;
+    const color = pos.color || colorForId(id);
+    const lat = parseFloat(pos.lat);
+    const lon = parseFloat(pos.lon);
+    const sos = pos.sos === 1 || pos.sos === "1";
+    const stale = Boolean(pos.stale);
+    const ts = pos.ts || (Date.now() / 1000);
+
+    const trend = pos.trend || "—";
+    const gs = pos.gs_kmh !== undefined && pos.gs_kmh !== null ? pos.gs_kmh.toFixed(1) : null;
+    const course = pos.course_deg !== undefined && pos.course_deg !== null ? pos.course_deg.toFixed(0) : null;
+    const vario = pos.vario_ms !== undefined && pos.vario_ms !== null ? pos.vario_ms.toFixed(1) : null;
+
+    const popupHtml = buildPopupHtml(pos);
 
     let marker = markers[id];
     if (!marker) {
@@ -296,11 +318,15 @@ function loadTrack(id) {
 function showTrack(id) {
     visibleTracks.add(id);
     loadTrack(id);
+    refreshMarkerPopup(id);
+    if (bridge && bridge.setTrackShown) bridge.setTrackShown(id, true);
 }
 
 function hideTrack(id) {
     visibleTracks.delete(id);
     removeTrack(id);
+    refreshMarkerPopup(id);
+    if (bridge && bridge.setTrackShown) bridge.setTrackShown(id, false);
 }
 
 function toggleTrack(id) {
@@ -309,6 +335,21 @@ function toggleTrack(id) {
     } else {
         showTrack(id);
     }
+}
+
+function removeTracker(id) {
+    // Удаление трекера: маркер, стрелка курса и трек убираются с карты.
+    if (markers[id]) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
+    }
+    if (arrows[id]) {
+        map.removeLayer(arrows[id]);
+        delete arrows[id];
+    }
+    removeTrack(id);
+    visibleTracks.delete(id);
+    delete lastTrackReload[id];
 }
 
 function setTrackFilter(fromTs, toTs) {

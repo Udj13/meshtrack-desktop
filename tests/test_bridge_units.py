@@ -1,4 +1,5 @@
 """Unit-тесты webbridge.py без GUI (QCoreApplication достаточно)."""
+
 import pytest
 from PySide6.QtCore import QCoreApplication, QObject, Signal
 
@@ -37,6 +38,18 @@ class VoidSignalSpy(QObject):
         self.count += 1
 
 
+class TrackShownSpy(QObject):
+    received = Signal(str, bool)
+
+    def __init__(self):
+        super().__init__()
+        self.values = []
+        self.received.connect(self._on_received)
+
+    def _on_received(self, tracker_id, shown):
+        self.values.append((tracker_id, shown))
+
+
 def test_push_position_emits_signal():
     bridge = WebBridge()
     spy = SignalSpy()
@@ -52,6 +65,17 @@ def test_push_position_emits_signal():
 def test_echo():
     bridge = WebBridge()
     assert bridge.echo("hello") == "hello"
+
+
+def test_set_track_shown_emits_signal():
+    bridge = WebBridge()
+    spy = TrackShownSpy()
+    bridge.trackShown.connect(spy.received)
+
+    bridge.setTrackShown("boon1", True)
+    bridge.setTrackShown("boon1", False)
+
+    assert spy.values == [("boon1", True), ("boon1", False)]
 
 
 class FakeRepo:
@@ -125,7 +149,9 @@ def test_get_min_max_zoom_without_settings():
 
 
 def test_get_min_max_zoom_with_missing_map(tmp_path):
-    cfg = FakeSettings(maps=[{"id": "x", "path": str(tmp_path / "missing.mbtiles")}], active="x")
+    cfg = FakeSettings(
+        maps=[{"id": "x", "path": str(tmp_path / "missing.mbtiles")}], active="x"
+    )
     bridge = WebBridge(settings=cfg)
     assert bridge.getMinZoom() == 9
     assert bridge.getMaxZoom() == 15

@@ -50,6 +50,16 @@ def test_restored_skips_trackers_without_positions(tmp_path: Path):
     assert ids == {"trkA", "trkB"}
 
 
+def test_restored_includes_alias(tmp_path: Path):
+    now = time.time()
+    repo = _make_repo(tmp_path / "restore.db", now)
+    repo.set_tracker_name("trkA", "Параплан")
+    restored = build_restored_positions(repo, now=now)
+    by_id = {p["id"]: p for p in restored}
+    assert by_id["trkA"]["name"] == "Параплан"
+    assert by_id["trkB"]["name"] is None
+
+
 def test_restored_fields_and_stale(tmp_path: Path):
     now = time.time()
     repo = _make_repo(tmp_path / "restore.db", now)

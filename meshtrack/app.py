@@ -10,10 +10,19 @@ import platform
 import sys
 import threading
 import time
+from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QTime, QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QAction, QColor
+from PySide6.QtCore import QDateTime, QRectF, QSize, QTime, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
@@ -29,6 +38,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -39,6 +49,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -95,6 +106,67 @@ def color_for_id(tracker_id: str) -> str:
     return PALETTE[h % len(PALETTE)]
 
 
+def _pencil_icon(size: int = 18) -> QIcon:
+    """Иконка карандаша (рисуется программно, без ресурсных файлов)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.translate(size / 2.0, size / 2.0)
+    painter.rotate(45)
+    w = 5.0
+    painter.setPen(Qt.NoPen)
+    # Ластик
+    painter.setBrush(QColor("#e26d9c"))
+    painter.drawRoundedRect(QRectF(-w / 2, -5.4, w, 1.5), 1.0, 1.0)
+    # Обойма
+    painter.setBrush(QColor("#b8b8b8"))
+    painter.drawRoundedRect(QRectF(-w / 2, -4.0, w, 1.0), 0.5, 0.5)
+    # Корпус
+    painter.setBrush(QColor("#3cb44b"))
+    painter.drawRoundedRect(QRectF(-w / 2, -3.0, w, 6.0), 0.8, 0.8)
+    # Деревянный наконечник (грифель)
+    tip = QPainterPath()
+    tip.moveTo(-w / 2, -2.8)
+    tip.lineTo(w / 2, -2.8)
+    tip.lineTo(0.0, 5.1)
+    tip.closeSubpath()
+    painter.setBrush(QColor("#d9a066"))
+    painter.drawPath(tip)
+    # Грифель — точка на кончике
+    painter.setBrush(QColor("#3a3a3a"))
+    painter.drawEllipse(QRectF(-0.9, 4.2, 1.8, 2.0))
+    painter.end()
+    return QIcon(pm)
+
+
+def _track_on_icon(size: int = 16) -> QIcon:
+    """Иконка «трек включён»: ломаная-маршрут на прозрачном фоне.
+
+    Белая линия с тёмным контуром — читается и на светлых, и на тёмных
+    цветах палитры трекеров.
+    """
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.Antialiasing)
+    route = QPainterPath()
+    route.moveTo(2.0, 13.0)
+    route.lineTo(6.0, 8.5)
+    route.lineTo(9.5, 11.5)
+    route.lineTo(13.0, 4.5)
+    painter.setPen(
+        QPen(QColor(0, 0, 0, 110), 3.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    )
+    painter.drawPath(route)
+    painter.setPen(
+        QPen(QColor(255, 255, 255), 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    )
+    painter.drawPath(route)
+    painter.end()
+    return QIcon(pm)
+
+
 def build_restored_positions(
     repo: Repository,
     track_history_seconds: int = 600,
@@ -109,6 +181,7 @@ def build_restored_positions(
     `stale` отражает давность пакета.
     """
     now = time.time() if now is None else now
+    names = repo.tracker_names()
     restored: list[dict] = []
     for tracker_id in repo.all_trackers():
         last = repo.latest(tracker_id)
@@ -117,6 +190,7 @@ def build_restored_positions(
         cache = repo.last_points(tracker_id, seconds=track_history_seconds)
         pos = {
             "id": tracker_id,
+            "name": names.get(tracker_id),
             "lat": float(last["lat"]),
             "lon": float(last["lon"]),
             "altitude": last["alt"],
@@ -169,6 +243,8 @@ class TrackerPanel(QWidget):
 
     trackerClicked = Signal(str)
     trackerDoubleClicked = Signal(str)
+    renameTracker = Signal(str)
+    deleteTracker = Signal(str)
 
     COLUMNS = [
         "",
@@ -180,12 +256,15 @@ class TrackerPanel(QWidget):
         "Заряд",
         "Напр.",
         "Обновлён",
+        "",
     ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._trackers: dict[str, dict] = {}
         self._row_ids: list[str] = []
+        # Состояние «трек показан» (зеркалится из JS) для индикатора в плашке.
+        self._track_visible: dict[str, bool] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -198,9 +277,15 @@ class TrackerPanel(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Stretch)
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 24)
+        # Колонки можно перетаскивать мышью; «Обновлён» занимает оставшееся
+        # место, последняя (кнопка «✕» удаление) — фиксированной ширины.
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(len(self.COLUMNS) - 2, QHeaderView.Stretch)
+        header.setSectionResizeMode(len(self.COLUMNS) - 1, QHeaderView.Fixed)
+        default_widths = [24, 80, 60, 52, 58, 64, 56, 60, 100, 36]
+        for col, width in enumerate(default_widths):
+            self.table.setColumnWidth(col, width)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
@@ -259,6 +344,10 @@ class TrackerPanel(QWidget):
             chip.setBackground(QColor(color))
             chip.setFlags(chip.flags() & ~Qt.ItemIsSelectable)
             chip.setToolTip(f"Цвет трекера {label}")
+            if self._track_visible.get(tracker_id):
+                # Трек включён — на плашке рисунок «маршрут».
+                chip.setIcon(_track_on_icon())
+                chip.setTextAlignment(Qt.AlignCenter)
 
             age_text = format_age(ts)
             if stale:
@@ -267,13 +356,11 @@ class TrackerPanel(QWidget):
             if stale:
                 age_item.setForeground(QColor("#808080"))
 
-            name_item = QTableWidgetItem(label)
-            if pos.get("name"):
-                name_item.setToolTip(f"ID: {tracker_id}")
+            name_tip = f"ID: {tracker_id}" if pos.get("name") else None
 
             items = [
                 chip,
-                name_item,
+                None,  # колонка ID — ячейка-виджет с именем и карандашом ниже
                 QTableWidgetItem(f"{gs_f:.1f}" if gs_f is not None else "—"),
                 QTableWidgetItem(f"{course_f:.0f}°" if course_f is not None else "—"),
                 QTableWidgetItem(
@@ -287,14 +374,63 @@ class TrackerPanel(QWidget):
                 age_item,
             ]
             for col, item in enumerate(items):
-                self.table.setItem(row, col, item)
+                if item is not None:
+                    self.table.setItem(row, col, item)
+
+            # Ячейка ID: псевдоним/имя слева, кнопка-карандаш (псевдоним) справа.
+            id_widget = QWidget()
+            id_lay = QHBoxLayout(id_widget)
+            id_lay.setContentsMargins(2, 0, 2, 0)
+            id_lay.setSpacing(3)
+            name_lbl = QLabel(label)
+            if name_tip:
+                name_lbl.setToolTip(name_tip)
+            rename_btn = QToolButton()
+            rename_btn.setIcon(_pencil_icon())
+            rename_btn.setIconSize(QSize(14, 14))
+            rename_btn.setFixedSize(18, 18)
+            rename_btn.setAutoRaise(True)
+            rename_btn.setCursor(Qt.PointingHandCursor)
+            rename_btn.setToolTip(f"Задать/изменить псевдоним трекера {label}")
+            rename_btn.clicked.connect(partial(self._on_rename_clicked, tracker_id))
+            id_lay.addWidget(name_lbl)
+            id_lay.addStretch(1)
+            id_lay.addWidget(rename_btn)
+            self.table.setCellWidget(row, 1, id_widget)
+
+            del_btn = QPushButton("✕")
+            del_btn.setFixedSize(28, 22)
+            del_btn.setFlat(True)
+            del_btn.setToolTip(f"Удалить все данные трекера {label}")
+            del_btn.clicked.connect(partial(self._on_delete_clicked, tracker_id))
+            self.table.setCellWidget(row, len(self.COLUMNS) - 1, del_btn)
+
+    def remove_tracker(self, tracker_id: str):
+        """Удаляет трекер из списка."""
+        if tracker_id in self._trackers:
+            del self._trackers[tracker_id]
+        self._track_visible.pop(tracker_id, None)
+        self._refresh()
+
+    def set_track_visible(self, tracker_id: str, shown: bool):
+        """Обновляет индикатор «трек показан» на цветной плашке."""
+        self._track_visible[tracker_id] = shown
+        self._refresh()
+
+    def _on_delete_clicked(self, tracker_id: str):
+        self.deleteTracker.emit(tracker_id)
+
+    def _on_rename_clicked(self, tracker_id: str):
+        self.renameTracker.emit(tracker_id)
 
     def _on_cell_clicked(self, row: int, _column: int):
+        # Одиночный клик — только центрирование карты (трек не включаем).
         if 0 <= row < len(self._row_ids):
             self.trackerClicked.emit(self._row_ids[row])
 
-    def _on_cell_double_clicked(self, row: int, _column: int):
-        if 0 <= row < len(self._row_ids):
+    def _on_cell_double_clicked(self, row: int, column: int):
+        # Трек включается/выключается только двойным кликом по цветной плашке.
+        if column == 0 and 0 <= row < len(self._row_ids):
             self.trackerDoubleClicked.emit(self._row_ids[row])
 
 
@@ -481,6 +617,8 @@ class MainWindow(QMainWindow):
         self.tracker_panel.setMaximumWidth(480)
         self.tracker_panel.trackerClicked.connect(self._on_tracker_clicked)
         self.tracker_panel.trackerDoubleClicked.connect(self._on_tracker_double_clicked)
+        self.tracker_panel.renameTracker.connect(self._on_rename_tracker)
+        self.tracker_panel.deleteTracker.connect(self._on_delete_tracker)
         self.splitter.addWidget(self.tracker_panel)
         self.splitter.setSizes([1100, 320])
 
@@ -494,6 +632,10 @@ class MainWindow(QMainWindow):
         # Последние позиции трекеров — нужны для периодической перерисовки
         # маркеров, когда данные устаревают (без нового пакета)
         self._last_positions: dict[str, dict] = {}
+        # Псевдонимы трекеров {tracker_id: name}; заполняются при старте.
+        self._tracker_names: dict[str, str] = {}
+        # Трекеры с включённым треком (зеркало JS set; для индикатора в списке).
+        self._visible_tracks: set[str] = set()
         self._stale_timer = QTimer(self)
         self._stale_timer.setInterval(30_000)
         self._stale_timer.timeout.connect(self._refresh_stale_states)
@@ -516,6 +658,7 @@ class MainWindow(QMainWindow):
         self.channel = QWebChannel(self)
         self.channel.registerObject("bridge", self.bridge)
         page.setWebChannel(self.channel)
+        self.bridge.trackShown.connect(self._on_track_shown)
 
         # Восстанавливаем последние позиции из истории: левый список и маркеры
         # на карте появляются сразу, не дожидаясь живых пакетов.
@@ -1085,6 +1228,10 @@ class MainWindow(QMainWindow):
         pos["recv_ts"] = recv_ts
         tracker_id = pos.get("id", "unknown")
 
+        # Псевдоним трекера (если задан) имеет приоритет над демо-именем.
+        if tracker_id in self._tracker_names:
+            pos["name"] = self._tracker_names[tracker_id]
+
         lat = float(pos.get("lat", 0))
         lon = float(pos.get("lon", 0))
         alt = float(pos.get("altitude")) if "altitude" in pos else None
@@ -1211,6 +1358,7 @@ class MainWindow(QMainWindow):
             self.logger.exception("Ошибка восстановления трекеров из истории")
             return
         self.bridge.restored_positions = restored
+        self._tracker_names = self.repo.tracker_names()
         for pos in restored:
             pos["color"] = color_for_id(pos["id"])
             self._last_positions[pos["id"]] = pos
@@ -1234,14 +1382,93 @@ class MainWindow(QMainWindow):
         self.status_map.setText(f"Карта: {map_id}")
 
     def _on_tracker_clicked(self, tracker_id: str):
-        # Клик по трекеру: центрируем карту и показываем трек (история).
-        self.web.page().runJavaScript(
-            f'centerTracker("{tracker_id}"); showTrack("{tracker_id}");'
-        )
+        # Одиночный клик: только центрируем карту и показываем попап.
+        self.web.page().runJavaScript(f'centerTracker("{tracker_id}")')
 
     def _on_tracker_double_clicked(self, tracker_id: str):
-        # Двойной клик скрывает трек (повторный клик снова покажет).
-        self.web.page().runJavaScript(f'hideTrack("{tracker_id}")')
+        # Двойной клик по цветной плашке: показать/скрыть трек.
+        self.web.page().runJavaScript(f'toggleTrack("{tracker_id}")')
+
+    def _on_track_shown(self, tracker_id: str, shown: bool):
+        """Зеркалит видимость трека из JS (индикатор на плашке в списке)."""
+        if shown:
+            self._visible_tracks.add(tracker_id)
+        else:
+            self._visible_tracks.discard(tracker_id)
+        self.tracker_panel.set_track_visible(tracker_id, shown)
+
+    def _on_delete_tracker(self, tracker_id: str):
+        """Удаление трекера: подтверждение, удаление из БД и с карты."""
+        label = tracker_id
+        last = self._last_positions.get(tracker_id)
+        if last and last.get("name"):
+            label = last["name"]
+        reply = QMessageBox.question(
+            self,
+            "Удалить трекер",
+            f"Удалить все данные трекера «{label}» ({tracker_id})?\n"
+            "Все позиции, треки и маркер будут удалены безвозвратно.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            deleted = self.repo.delete_tracker(tracker_id)
+        except Exception:
+            self.logger.exception("Ошибка удаления трекера %s", tracker_id)
+            return
+        self.logger.info("Удалён трекер %s, позиций удалено: %d", tracker_id, deleted)
+        self._last_positions.pop(tracker_id, None)
+        self._points_cache.pop(tracker_id, None)
+        self._tracker_names.pop(tracker_id, None)
+        self.tracker_panel.remove_tracker(tracker_id)
+        self.web.page().runJavaScript(f'removeTracker("{tracker_id}")')
+        self._update_active_status()
+
+    def _on_rename_tracker(self, tracker_id: str):
+        """Задать/изменить/снять псевдоним трекера."""
+        current = self._tracker_names.get(tracker_id, "")
+        label = str(current or tracker_id)
+        text, ok = QInputDialog.getText(
+            self,
+            "Псевдоним трекера",
+            f"Псевдоним для {tracker_id}\n"
+            "(оставьте поле пустым, чтобы убрать псевдоним):",
+            text=current,
+        )
+        if not ok:
+            return
+        new = text.strip()
+        if new == "" and current:
+            reply = QMessageBox.question(
+                self,
+                "Убрать псевдоним",
+                f"Убрать псевдоним «{current}» у трекера {tracker_id}?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+        if new == current:
+            return
+        try:
+            self.repo.set_tracker_name(tracker_id, new or None)
+        except Exception:
+            self.logger.exception("Ошибка сохранения псевдонима %s", tracker_id)
+            return
+        if new:
+            self._tracker_names[tracker_id] = new
+        else:
+            self._tracker_names.pop(tracker_id, None)
+        self.logger.info("Псевдоним %s: %r → %r", tracker_id, label, new or None)
+        pos = self._last_positions.get(tracker_id)
+        if pos is None:
+            return
+        pos["name"] = new or None
+        self._last_positions[tracker_id] = pos
+        self.tracker_panel.update_tracker(pos)
+        self.bridge.pushPosition(pos)
 
     def closeEvent(self, event):
         self.logger.info("Закрытие приложения")
