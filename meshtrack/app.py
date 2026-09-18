@@ -217,14 +217,61 @@ def app_data_dir() -> Path:
         return Path.home() / "Library" / "Application Support" / "MeshTrack"
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    """Русское склонение: 1 предмет, 2 предмета, 5 предметов."""
+    n10 = n % 10
+    n100 = n % 100
+    if n10 == 1 and n100 != 11:
+        return one
+    if n10 in (2, 3, 4) and not (12 <= n100 <= 14):
+        return few
+    return many
+
+
 def format_age(ts: float | None) -> str:
-    """Форматирует 'время назад' для таблицы трекеров."""
+    """Форматирует 'время назад' для таблицы трекеров.
+
+    < 1 мин  -> "N с"
+    < 2 ч    -> "N мин" / "X ч Y мин"
+    < 2 дн   -> "X дн Y ч" / "X ч"
+    >= 2 дн  -> "N дн"
+
+    Уже ~2 ч и больше — без минут; 2 дня и больше — без часов.
+    """
     if ts is None:
         return "—"
     dt = max(0, int(time.time() - ts))
+
+    days, rem = divmod(dt, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+
     if dt < 60:
         return f"{dt} с"
-    return f"{dt // 60} мин"
+    if dt < 7200:  # < 2 ч — показываем минуты
+        if hours:
+            return (
+                f"{hours} {_plural(hours, 'час', 'часа', 'часов')} "
+                f"{minutes} {_plural(minutes, 'минута', 'минуты', 'минут')}"
+            )
+        return f"{minutes} {_plural(minutes, 'минута', 'минуты', 'минут')}"
+    if dt < 172800:  # < 2 дн — без минут
+        if not days:
+            return f"{hours} {_plural(hours, 'час', 'часа', 'часов')}"
+        hs = f" {hours} {_plural(hours, 'час', 'часа', 'часов')}" if hours else ""
+        return f"{days} {_plural(days, 'день', 'дня', 'дней')}{hs}"
+    return f"{days} {_plural(days, 'день', 'дня', 'дней')}"
+
+
+def display_id(tracker_id: str) -> str:
+    """Убирает префикс 'boon' из tracker_id для отображения.
+
+    Внутренний id хранит префикс (история в БД, отправка на Traccar),
+    а пользователю показываем «чистый» device_id.
+    """
+    if tracker_id and tracker_id.startswith("boon"):
+        return tracker_id[4:]
+    return str(tracker_id)
 
 
 class ClickableLabel(QLabel):
@@ -338,7 +385,7 @@ class TrackerPanel(QWidget):
             if stale is None:
                 stale = is_stale(ts)
 
-            label = str(pos.get("name") or tracker_id)
+            label = str(pos.get("name") or display_id(tracker_id))
 
             chip = QTableWidgetItem()
             chip.setBackground(QColor(color))
@@ -356,7 +403,7 @@ class TrackerPanel(QWidget):
             if stale:
                 age_item.setForeground(QColor("#808080"))
 
-            name_tip = f"ID: {tracker_id}" if pos.get("name") else None
+            name_tip = f"ID: {display_id(tracker_id)}" if pos.get("name") else None
 
             items = [
                 chip,
@@ -1399,14 +1446,14 @@ class MainWindow(QMainWindow):
 
     def _on_delete_tracker(self, tracker_id: str):
         """Удаление трекера: подтверждение, удаление из БД и с карты."""
-        label = tracker_id
+        label = display_id(tracker_id)
         last = self._last_positions.get(tracker_id)
         if last and last.get("name"):
             label = last["name"]
         reply = QMessageBox.question(
             self,
             "Удалить трекер",
-            f"Удалить все данные трекера «{label}» ({tracker_id})?\n"
+            f"Удалить все данные трекера «{label}» ({display_id(tracker_id)})?\n"
             "Все позиции, треки и маркер будут удалены безвозвратно.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -1429,11 +1476,11 @@ class MainWindow(QMainWindow):
     def _on_rename_tracker(self, tracker_id: str):
         """Задать/изменить/снять псевдоним трекера."""
         current = self._tracker_names.get(tracker_id, "")
-        label = str(current or tracker_id)
+        label = display_id(tracker_id)
         text, ok = QInputDialog.getText(
             self,
             "Псевдоним трекера",
-            f"Псевдоним для {tracker_id}\n"
+            f"Псевдоним для {display_id(tracker_id)}\n"
             "(оставьте поле пустым, чтобы убрать псевдоним):",
             text=current,
         )
@@ -1444,7 +1491,7 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Убрать псевдоним",
-                f"Убрать псевдоним «{current}» у трекера {tracker_id}?",
+                f"Убрать псевдоним «{current}» у трекера {display_id(tracker_id)}?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )

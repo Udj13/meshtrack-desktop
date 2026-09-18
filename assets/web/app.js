@@ -14,10 +14,39 @@ function colorForId(id) {
     return PALETTE[hash % PALETTE.length];
 }
 
+function plural(n, one, few, many) {
+    const n10 = n % 10;
+    const n100 = n % 100;
+    if (n10 === 1 && n100 !== 11) return one;
+    if (n10 >= 2 && n10 <= 4 && !(n100 >= 12 && n100 <= 14)) return few;
+    return many;
+}
+
 function formatAge(tsSec) {
-    const dt = Math.max(0, Math.floor((Date.now() / 1000) - tsSec));
+    const dt = Math.max(0, Math.floor(Date.now() / 1000 - tsSec));
+    const days = Math.floor(dt / 86400);
+    const hours = Math.floor((dt % 86400) / 3600);
+    const minutes = Math.floor((dt % 3600) / 60);
     if (dt < 60) return dt + " с";
-    return Math.floor(dt / 60) + " мин";
+    if (dt < 7200) {
+        if (hours > 0) {
+            return hours + " " + plural(hours, "час", "часа", "часов") + " " +
+                minutes + " " + plural(minutes, "минута", "минуты", "минут");
+        }
+        return minutes + " " + plural(minutes, "минута", "минуты", "минут");
+    }
+    if (dt < 172800) {
+        if (days > 0) {
+            const hs = hours > 0 ? " " + hours + " " + plural(hours, "час", "часа", "часов") : "";
+            return days + " " + plural(days, "день", "дня", "дней") + hs;
+        }
+        return hours + " " + plural(hours, "час", "часа", "часов");
+    }
+    return days + " " + plural(days, "день", "дня", "дней");
+}
+
+function displayId(id) {
+    return (typeof id === "string" && id.indexOf("boon") === 0) ? id.slice(4) : String(id);
 }
 
 // --- Цветовые режимы трека ---
@@ -154,7 +183,7 @@ function buildPopupHtml(pos) {
         visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
     }</a>`;
     return `
-        <b>${pos.name || id}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${id})</span>` : ""}<br>
+        <b>${pos.name || displayId(id)}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${displayId(id)})</span>` : ""}<br>
         Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
         Курс: ${course !== null ? course + "°" : "—"}<br>
         Высота: ${alt} м<br>
