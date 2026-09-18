@@ -17,13 +17,15 @@ class SerialWorker(QThread):
     """Поток чтения из serial-порта или file-URL.
 
     Сигналы:
-        position(dict): валидная parsed-позиция.
+        position(dict):  валидная parsed-позиция.
+        telemetry(dict): телеметрия без координат (status-пакет с device_id).
         raw_line(str):   сырая строка из порта (для отладки/лога).
-        error(str):     ошибка открытия/чтения порта.
+        error(str):      ошибка открытия/чтения порта.
         queue_size(int): размер очереди приёмника (Queue size: N).
     """
 
     position = Signal(dict)
+    telemetry = Signal(dict)
     raw_line = Signal(str)
     error = Signal(str)
     queue_size = Signal(int)
@@ -82,8 +84,13 @@ class SerialWorker(QThread):
                 self.queue_size.emit(qs)
 
             parsed = parse_packet(line)
-            if parsed is not None and is_valid_position(parsed):
+            if parsed is None:
+                continue
+            if is_valid_position(parsed):
                 self.position.emit(parsed)
+            else:
+                # Телеметрия без координат (status-пакет): заряд/напряжение и т. п.
+                self.telemetry.emit(parsed)
 
         if self._ser is not None:
             try:

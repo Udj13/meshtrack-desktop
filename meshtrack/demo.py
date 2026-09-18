@@ -4,9 +4,9 @@
 переменной окружения `MESHTRACK_DEMO=1`; в обычном запуске не используется.
 Отключение — запуск без флага/переменной.
 
-`DemoWorker` повторяет интерфейс `SerialWorker` (сигналы position/raw_line/
-error/queue_size, метод stop(), атрибут port), поэтому подключается к
-MainWindow через те же обработчики.
+`DemoWorker` повторяет интерфейс `SerialWorker` (сигналы position/telemetry/
+raw_line/error/queue_size, метод stop(), атрибут port), поэтому подключается
+к MainWindow через те же обработчики.
 
 Моковые треки — реалистичные замкнутые маршруты (перегоны между точками +
 короткие термики-круги набора), с плавно меняющейся высотой.
@@ -33,14 +33,14 @@ TICK_S = 2.0
 # Шаг точек при заполнении истории (сек).
 SEED_STEP_S = 15.0
 
-TRACKER_IDS = ("boon101", "boon102", "boon103", "boon104")
+TRACKER_IDS = ("101", "102", "103", "104")
 
 # Человекочитаемые имена для демо: планеры и параплан (как в реальном клубе).
 TRACKER_NAMES = {
-    "boon101": "АСК-21",
-    "boon102": "Дискус",
-    "boon103": "Бланик",
-    "boon104": "Параплан",
+    "101": "АСК-21",
+    "102": "Дискус",
+    "103": "Бланик",
+    "104": "Параплан",
 }
 
 # Демо-маршруты относительно базовой точки. Нога — ("go", north_м, east_м,
@@ -49,7 +49,7 @@ TRACKER_NAMES = {
 # короткие круги набора на термальной точке. Маршрут замкнут (последняя нога
 # возвращает к старту), `start_alt` — высота старта/посадки.
 TRACKS: dict[str, dict] = {
-    "boon101": {
+    "101": {
         "name": "АСК-21",
         "start_alt": 140.0,
         # «Коробочка» над аэродромом: взлёт, набор, по ветру, траверс, финальный.
@@ -62,7 +62,7 @@ TRACKS: dict[str, dict] = {
             ("go", 0, 0, 140, 85),
         ],
     },
-    "boon102": {
+    "102": {
         "name": "Дискус",
         "start_alt": 200.0,
         # Треугольный маршрут: длинные перегоны и два термика набора (~1.2 м/с).
@@ -76,7 +76,7 @@ TRACKS: dict[str, dict] = {
             ("go", 0, 0, 200, 75),
         ],
     },
-    "boon103": {
+    "103": {
         "name": "Бланик",
         "start_alt": 160.0,
         # Дальний маршрут туда-обратно с термиками у разворотных точек.
@@ -90,7 +90,7 @@ TRACKS: dict[str, dict] = {
             ("go", 0, 0, 170, 78),
         ],
     },
-    "boon104": {
+    "104": {
         "name": "Параплан",
         "start_alt": 210.0,
         # Медленный маршрут «гребёнка» с подъёмами/снижениями по линии.
@@ -107,7 +107,7 @@ TRACKS: dict[str, dict] = {
 }
 
 # Фазы «турбулентности» (шума высоты) — разнести синусоиды по трекерам.
-_WAVE_PHASE = {"boon101": 0.0, "boon102": 1.1, "boon103": 2.3, "boon104": 3.7}
+_WAVE_PHASE = {"101": 0.0, "102": 1.1, "103": 2.3, "104": 3.7}
 
 
 def local_midnight(ts: float | None = None) -> float:
@@ -218,7 +218,7 @@ def position_at(
     alt += 15.0 * math.sin((t + _WAVE_PHASE[tracker_id]) * (2.0 * math.pi / 37.0))
 
     batt = _battery(t, t_ref)
-    sos = 1 if tracker_id == "boon104" and (t - t_ref) % 180 < 20 else 0
+    sos = 1 if tracker_id == "104" and (t - t_ref) % 180 < 20 else 0
     return {
         "id": tracker_id,
         "name": TRACKER_NAMES[tracker_id],
@@ -242,7 +242,7 @@ def format_json(pos: dict) -> str:
     )
     return json.dumps(
         {
-            "device_id": int(pos["id"].removeprefix("boon")),
+            "device_id": int(pos["id"]),
             "lat": pos["lat"],
             "lon": pos["lon"],
             "alt": pos["altitude"],
@@ -314,6 +314,7 @@ class DemoWorker(QThread):
     """Эмулирует SerialWorker: генерирует поток моковых позиций."""
 
     position = Signal(dict)
+    telemetry = Signal(dict)
     raw_line = Signal(str)
     error = Signal(str)
     queue_size = Signal(int)

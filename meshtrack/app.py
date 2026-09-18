@@ -263,17 +263,6 @@ def format_age(ts: float | None) -> str:
     return f"{days} {_plural(days, 'день', 'дня', 'дней')}"
 
 
-def display_id(tracker_id: str) -> str:
-    """Убирает префикс 'boon' из tracker_id для отображения.
-
-    Внутренний id хранит префикс (история в БД, отправка на Traccar),
-    а пользователю показываем «чистый» device_id.
-    """
-    if tracker_id and tracker_id.startswith("boon"):
-        return tracker_id[4:]
-    return str(tracker_id)
-
-
 class ClickableLabel(QLabel):
     """QLabel, испускающий clicked при клике левой кнопкой мыши."""
 
@@ -385,7 +374,7 @@ class TrackerPanel(QWidget):
             if stale is None:
                 stale = is_stale(ts)
 
-            label = str(pos.get("name") or display_id(tracker_id))
+            label = str(pos.get("name") or tracker_id)
 
             chip = QTableWidgetItem()
             chip.setBackground(QColor(color))
@@ -403,7 +392,7 @@ class TrackerPanel(QWidget):
             if stale:
                 age_item.setForeground(QColor("#808080"))
 
-            name_tip = f"ID: {display_id(tracker_id)}" if pos.get("name") else None
+            name_tip = f"ID: {tracker_id}" if pos.get("name") else None
 
             items = [
                 chip,
@@ -679,6 +668,9 @@ class MainWindow(QMainWindow):
         # Последние позиции трекеров — нужны для периодической перерисовки
         # маркеров, когда данные устаревают (без нового пакета)
         self._last_positions: dict[str, dict] = {}
+        # Телеметрия без позиции {tracker_id: {batt, voltage, ts}} — заряд
+        # из status-пакетов; главнее позиции (там 0 = «нет данных»).
+        self._telemetry: dict[str, dict] = {}
         # Псевдонимы трекеров {tracker_id: name}; заполняются при старте.
         self._tracker_names: dict[str, str] = {}
         # Трекеры с включённым треком (зеркало JS set; для индикатора в списке).
@@ -1164,6 +1156,7 @@ class MainWindow(QMainWindow):
         """Подключает сигналы потока данных (SerialWorker или DemoWorker)."""
         worker.finished.connect(self._on_worker_finished)
         worker.position.connect(self._handle_position)
+        worker.telemetry.connect(self._handle_telemetry)
         worker.queue_size.connect(self._handle_queue_size)
         worker.error.connect(self._handle_serial_error)
         worker.raw_line.connect(self._handle_raw_line)
@@ -1282,9 +1275,17 @@ class MainWindow(QMainWindow):
         lat = float(pos.get("lat", 0))
         lon = float(pos.get("lon", 0))
         alt = float(pos.get("altitude")) if "altitude" in pos else None
-        batt = float(pos.get("batt")) if "batt" in pos else None
-        voltage = float(pos.get("voltage")) if "voltage" in pos else None
+        batt = float(pos["batt"]) if "batt" in pos and pos["batt"] else None
+        voltage = float(pos["voltage"]) if "voltage" in pos and pos["voltage"] else None
         sos = int(pos.get("sos", 0)) if "sos" in pos else None
+
+        # Позиция может нести batt=0/mv=0 («нет данных»); тогда берём заряд
+        # из телеметрии (status-пакет) — она достовернее позиции.
+        tel = self._telemetry.get(tracker_id)
+        if (batt is None or not (1 <= batt <= 100)) and tel and tel.get("batt") is not None:
+            batt = tel["batt"]
+        if not voltage and tel and tel.get("voltage") is not None:
+            voltage = tel["voltage"]
 
         device_ts_str = pos.get("timestamp") or "N/A"
         recv_ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(recv_ts))
@@ -1336,6 +1337,45 @@ class MainWindow(QMainWindow):
         self.bridge.pushPosition(pos)
         self.publisher.enqueue(pos)
         self._update_active_status()
+
+    def _handle_telemetry(self, pos: dict):
+        """Status-пакет без координат: обновляет заряд/напряжение трекера.
+
+        Телеметрия — самый достоверный источник заряда (позиция часто несёт
+        0 = «данных нет»), поэтому она перезаписывает batt/voltage у трекера,
+        который уже есть на карте. Для неизвестного трекера значение просто
+        кэшируется до первой позиции (см. _handle_position).
+        """
+        tracker_id = pos.get("id")
+        if not tracker_id:
+            return
+        tel = {"ts": time.time()}
+        if "batt" in pos and pos["batt"] is not None:
+            tel["batt"] = float(pos["batt"])
+        if "voltage" in pos and pos["voltage"] is not None:
+            tel["voltage"] = float(pos["voltage"])
+        self._telemetry[tracker_id] = tel
+
+        cur = self._last_positions.get(tracker_id)
+        if cur is None:
+            return  # позиции ещё не было — применим при первой
+        changed = False
+        for key in ("batt", "voltage"):
+            if key in tel and cur.get(key) != tel[key]:
+                cur = dict(cur)
+                cur[key] = tel[key]
+                changed = True
+        if not changed:
+            return
+        self._last_positions[tracker_id] = cur
+        self.logger.debug(
+            "Телеметрия %s: batt=%s%% voltage=%s",
+            tracker_id,
+            tel.get("batt"),
+            tel.get("voltage"),
+        )
+        self.tracker_panel.update_tracker(cur)
+        self.bridge.pushPosition(cur)
 
     def _refresh_stale_states(self):
         """Раз в 30 с проверяет, не устарели ли сохранённые позиции."""
@@ -1446,14 +1486,14 @@ class MainWindow(QMainWindow):
 
     def _on_delete_tracker(self, tracker_id: str):
         """Удаление трекера: подтверждение, удаление из БД и с карты."""
-        label = display_id(tracker_id)
+        label = tracker_id
         last = self._last_positions.get(tracker_id)
         if last and last.get("name"):
             label = last["name"]
         reply = QMessageBox.question(
             self,
             "Удалить трекер",
-            f"Удалить все данные трекера «{label}» ({display_id(tracker_id)})?\n"
+            f"Удалить все данные трекера «{label}» ({tracker_id})?\n"
             "Все позиции, треки и маркер будут удалены безвозвратно.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -1476,11 +1516,11 @@ class MainWindow(QMainWindow):
     def _on_rename_tracker(self, tracker_id: str):
         """Задать/изменить/снять псевдоним трекера."""
         current = self._tracker_names.get(tracker_id, "")
-        label = display_id(tracker_id)
+        label = tracker_id
         text, ok = QInputDialog.getText(
             self,
             "Псевдоним трекера",
-            f"Псевдоним для {display_id(tracker_id)}\n"
+            f"Псевдоним для {tracker_id}\n"
             "(оставьте поле пустым, чтобы убрать псевдоним):",
             text=current,
         )
@@ -1491,7 +1531,7 @@ class MainWindow(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Убрать псевдоним",
-                f"Убрать псевдоним «{current}» у трекера {display_id(tracker_id)}?",
+                f"Убрать псевдоним «{current}» у трекера {tracker_id}?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )

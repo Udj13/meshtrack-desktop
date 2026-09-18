@@ -36,8 +36,10 @@ def _to_int(value) -> int | None:
 def parse_packet(line: str) -> dict | None:
     """Парсит JSON-строку пакета в dict формата приложения.
 
-    Возвращает None, если строка не JSON-объект или в ней нет
-    обязательных полей device_id/lat/lon.
+    Позиционный пакет (есть device_id/lat/lon) даёт полный dict;
+    телеметрия без координат (есть только device_id, напр. status с
+    battery_pct при выключенном GPS) — dict без lat/lon/altitude.
+    Возвращает None, если строка не JSON-объект или в ней нет device_id.
     """
     line = line.strip()
     if not line.startswith("{"):
@@ -48,14 +50,14 @@ def parse_packet(line: str) -> dict | None:
         return None
     if not isinstance(obj, dict):
         return None
-    if "device_id" not in obj or "lat" not in obj or "lon" not in obj:
+    if "device_id" not in obj:
         return None
 
     params: dict = {}
 
     device_id = obj.get("device_id")
     if device_id is not None:
-        params["id"] = f"boon{device_id}"
+        params["id"] = str(device_id)
 
     for src, dst in (
         ("lat", "lat"),

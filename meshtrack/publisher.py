@@ -45,8 +45,13 @@ def build_payload(pos: dict) -> dict:
             timestamp = None
 
     sos = pos.get("sos")
+    raw_id = pos.get("id")
+    # Внутренний id хранится чистым; префикс «boon» нужен только на общем
+    # Traccar-сервере, чтобы не пересекаться с чужими устройствами.
+    if raw_id is not None and not str(raw_id).startswith("boon"):
+        raw_id = f"boon{raw_id}"
     payload = {
-        "id": pos.get("id"),
+        "id": raw_id,
         "lat": pos.get("lat"),
         "lon": pos.get("lon"),
         "altitude": pos.get("altitude"),

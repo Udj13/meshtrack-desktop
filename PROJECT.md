@@ -79,7 +79,7 @@ JSON-строки приёмника, табличный legacy-формат н�
 | Модуль | Ответственность |
 |---|---|
 | `meshtrack/parser.py` | Чистый парсер JSON-строки пакета → dict (`parse_packet`). Не зависит от Qt. |
-| `meshtrack/serial_worker.py` | QThread: открытие порта, построчное чтение, `position(dict)` из JSON-строк. |
+| `meshtrack/serial_worker.py` | QThread: открытие порта, построчное чтение, `position(dict)` для позиций и `telemetry(dict)` для пакетов без координат. |
 | `meshtrack/derivation.py` | По истории точек считает GS (geometry-ema), курс (bearing), варио (Δalt/Δt). |
 | `meshtrack/repository.py` | SQLite: `positions`, `trackers`; append; запросы по фильтрам. |
 | `meshtrack/mapstore.py` | Работа с MBTiles: создание, вставка тайлов, чтение, verify; «битые» тайлы (не PNG — html-ошибки сервера) считаются отсутствующими и обнаруживаются verify. |
@@ -187,9 +187,15 @@ MeshTrack desktop/
 ```
 
 - Обязательные поля: `device_id`, `lat`, `lon`; `alt` опционален.
-- `device_id` нормализуется как `boon{id}` (наследие легаси; сохраняем
-  внутренне — история в БД и отправка на Traccar идут с префиксом; в UI
-  префикс не показывается, `app.display_id()` срезает его).
+- Пакет с `device_id`, но **без** `lat`/`lon` — **телеметрия** (status-пакет,
+  напр. при выключенном GPS): парсится в dict без координат и уходит в
+  сигнал `telemetry` (для SerialWorker `telemetry`, демо не эмитит). Заряд из
+  неё обновляется и **главнее** позиции: в позиции `batt`/`voltage` часто
+  равны 0 = «данных нет» (`app.py` `_handle_telemetry`/кэш `self._telemetry`).
+- `device_id` — текстовый внутренний id **без префикса**; префикс `boon`
+  приклеивается только при формировании payload на Traccar
+  (`publisher.build_payload`) — на общем сервере он выделяет устройства этой
+  группы и не конфликтует с чужыми id.
 - `datetime` (UTC) → ISO `YYYY-MM-DDTHH:MM:SSZ` + `device_ts` (unix epoch);
   ошибка → `timestamp` = `'N/A'`, `device_ts` отсутствует.
 - `battery_pct` → `batt`, `battery_mv` → `voltage`; `rssi`/`snr` приводятся к
@@ -265,7 +271,7 @@ MeshTrack desktop/
 
 ```sql
 CREATE TABLE trackers(
-  id TEXT PRIMARY KEY,          -- boon123
+  id TEXT PRIMARY KEY,          -- чистый device_id (напр. 123)
   name TEXT,                     -- опциональный человекочит. ярлык
   color TEXT                     -- назначенный цвет палитры
 );

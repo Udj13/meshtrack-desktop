@@ -10,7 +10,7 @@ class FakeResponse:
 
 
 POSITION = {
-    "id": "boon123",
+    "id": "123",
     "lat": "54.12345",
     "lon": "45.6789",
     "altitude": "1230",
@@ -43,7 +43,7 @@ def test_build_payload_legacy_fields():
 def test_build_payload_prefers_parser_timestamp_and_defaults_sos():
     payload = build_payload(
         {
-            "id": "boon1",
+            "id": "1",
             "lat": 54.0,
             "lon": 45.0,
             "timestamp": "2026-09-10T12:34:56Z",
@@ -85,7 +85,7 @@ def test_enabled_enqueue_sends_payload():
 def test_invalid_position_not_enqueued():
     calls = []
     publisher = TraccarPublisher(enable=True, post=lambda *a, **k: calls.append(a))
-    publisher.enqueue({"id": "boon1"})  # нет lat/lon
+    publisher.enqueue({"id": "1"})  # нет lat/lon
     publisher.enqueue({"lat": 1.0, "lon": 2.0})  # нет id
     time.sleep(0.05)
     assert calls == []

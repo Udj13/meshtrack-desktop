@@ -20,7 +20,7 @@ SAMPLE_JSON = (
 
 def test_parse_all_fields():
     p = parse_packet(SAMPLE_JSON)
-    assert p["id"] == "boon42"
+    assert p["id"] == "42"
     assert p["lat"] == 54.12345
     assert p["lon"] == 45.67890
     assert p["altitude"] == 1230.0
@@ -38,12 +38,12 @@ def test_parse_all_fields():
 def test_timestamp_normalized_id():
     p = parse_packet(SAMPLE_JSON)
     assert "datetime" not in p
-    assert p["id"].startswith("boon")
+    assert p["id"] == "42"
 
 
 def test_partial_packet():
     p = parse_packet('{"device_id":7,"lat":1.23,"lon":4.56}')
-    assert p["id"] == "boon7"
+    assert p["id"] == "7"
     assert p["lat"] == 1.23
     assert "timestamp" not in p
     assert "device_ts" not in p
@@ -55,6 +55,32 @@ def test_not_json_or_missing_fields():
     assert parse_packet("[1,2,3]") is None
     assert parse_packet('{"lat":1,"lon":2}') is None
     assert parse_packet("") is None
+
+
+def test_parse_status_telemetry_no_position():
+    """Status-пакет без лат/лона парсится как телеметрия (заряд, без позиции)."""
+    line = (
+        '{"type":"status","device_id":2297873940,"device_name":"Tracker 2",'
+        '"portnum":67,"battery_pct":68,"battery_mv":3985,'
+        '"rssi":"-36.00dBm","snr":"5.00dB","ttl":7,"uptime_s":312}'
+    )
+    p = parse_packet(line)
+    assert p is not None
+    assert p["id"] == "2297873940"
+    assert p["batt"] == 68.0
+    assert p["voltage"] == 3985.0
+    assert p["rssi"] == -36.0
+    assert p["snr"] == 5.0
+    assert p["ttl"] == 7
+    assert "lat" not in p
+    assert "lon" not in p
+    assert "altitude" not in p
+    assert "timestamp" not in p
+
+
+def test_parse_telemetry_requires_device_id():
+    assert parse_packet('{"type":"status","portnum":67,"battery_pct":68}') is None
+    assert parse_packet('{"battery_pct":68,"battery_mv":3985}') is None
 
 
 def test_bad_datetime():
@@ -69,10 +95,10 @@ def test_queue_size():
 
 
 def test_valid_position_bounds():
-    good = {"id": "boon1", "lat": 54.4, "lon": 45.4, "altitude": 500}
-    bad_lat = {"id": "boon1", "lat": 200, "lon": 45.4}
-    bad_lon = {"id": "boon1", "lat": 54.4, "lon": -181}
-    bad_alt = {"id": "boon1", "lat": 54.4, "lon": 45.4, "altitude": 50000}
+    good = {"id": "1", "lat": 54.4, "lon": 45.4, "altitude": 500}
+    bad_lat = {"id": "1", "lat": 200, "lon": 45.4}
+    bad_lon = {"id": "1", "lat": 54.4, "lon": -181}
+    bad_alt = {"id": "1", "lat": 54.4, "lon": 45.4, "altitude": 50000}
     assert is_valid_position(good)
     assert not is_valid_position(bad_lat)
     assert not is_valid_position(bad_lon)
@@ -89,6 +115,6 @@ def test_fake_serial_sample_climb(tmp_path):
     for line in lines:
         p = parse_packet(line)
         assert p is not None
-        assert p["id"].startswith("boon")
+        assert p["id"]
         assert p["lat"] and p["lon"]
         assert "altitude" in p

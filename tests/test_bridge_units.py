@@ -55,11 +55,11 @@ def test_push_position_emits_signal():
     spy = SignalSpy()
     bridge.positionReceived.connect(spy.received)
 
-    pos = {"id": "boon1", "lat": "54.4", "lon": "45.4"}
+    pos = {"id": "1", "lat": "54.4", "lon": "45.4"}
     bridge.pushPosition(pos)
 
     assert len(spy.values) == 1
-    assert spy.values[0]["id"] == "boon1"
+    assert spy.values[0]["id"] == "1"
 
 
 def test_echo():
@@ -72,10 +72,10 @@ def test_set_track_shown_emits_signal():
     spy = TrackShownSpy()
     bridge.trackShown.connect(spy.received)
 
-    bridge.setTrackShown("boon1", True)
-    bridge.setTrackShown("boon1", False)
+    bridge.setTrackShown("1", True)
+    bridge.setTrackShown("1", False)
 
-    assert spy.values == [("boon1", True), ("boon1", False)]
+    assert spy.values == [("1", True), ("1", False)]
 
 
 class FakeRepo:
@@ -99,7 +99,7 @@ def test_get_track_returns_json():
     bridge = WebBridge(repo=FakeRepo(pts))
     import json
 
-    result = json.loads(bridge.getTrack("boon1", 0.0, 3.0))
+    result = json.loads(bridge.getTrack("1", 0.0, 3.0))
     assert result["points"] == pts
 
 
@@ -107,7 +107,7 @@ def test_get_track_without_repo():
     bridge = WebBridge()
     import json
 
-    result = json.loads(bridge.getTrack("boon1", 0.0, 1.0))
+    result = json.loads(bridge.getTrack("1", 0.0, 1.0))
     assert result["points"] == []
 
 

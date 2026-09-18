@@ -45,10 +45,6 @@ function formatAge(tsSec) {
     return days + " " + plural(days, "день", "дня", "дней");
 }
 
-function displayId(id) {
-    return (typeof id === "string" && id.indexOf("boon") === 0) ? id.slice(4) : String(id);
-}
-
 // --- Цветовые режимы трека ---
 function colorForAltitude(alt) {
     // синий (0 м) -> красный (4000 м)
@@ -183,7 +179,7 @@ function buildPopupHtml(pos) {
         visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
     }</a>`;
     return `
-        <b>${pos.name || displayId(id)}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${displayId(id)})</span>` : ""}<br>
+        <b>${pos.name || id}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${id})</span>` : ""}<br>
         Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
         Курс: ${course !== null ? course + "°" : "—"}<br>
         Высота: ${alt} м<br>

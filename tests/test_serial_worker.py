@@ -45,9 +45,9 @@ def test_serial_worker_reads_file(fake_blocks_file):
     app.exec()
 
     assert len(positions) == 3
-    assert positions[0]["id"] == "boon1"
-    assert positions[1]["id"] == "boon2"
-    assert positions[2]["id"] == "boon3"
+    assert positions[0]["id"] == "1"
+    assert positions[1]["id"] == "2"
+    assert positions[2]["id"] == "3"
     assert positions[0]["device_ts"] is not None
     assert queues == [1, 2, 3]
     assert len(raw) > 0
@@ -83,10 +83,41 @@ def test_serial_worker_ignores_table_and_boot_output(tmp_path):
     app.exec()
 
     assert len(positions) == 2
-    assert positions[0]["id"] == "boon1"
-    assert positions[1]["id"] == "boon2"
+    assert positions[0]["id"] == "1"
+    assert positions[1]["id"] == "2"
     assert positions[0]["altitude"] == 168.0
     assert positions[1]["altitude"] == 201.0
+
+
+def test_serial_worker_telemetry_status(tmp_path):
+    """Status-пакет без координат → telemetry (не position)."""
+    p = tmp_path / "telemetry.txt"
+    p.write_text(
+        _json_line(1, 54.0, 45.0, 500, 1)
+        + "\n"
+        + '{"type":"status","device_id":2297873940,"device_name":"Tracker 2",'
+        '"portnum":67,"battery_pct":68,"battery_mv":3985,'
+        '"rssi":"-36.00dBm","snr":"5.00dB","ttl":7,"uptime_s":312}\n',
+        encoding="utf-8",
+    )
+    app = QCoreApplication.instance()
+
+    positions = []
+    telemetry = []
+    worker = SerialWorker(f"file://{p}")
+    worker.position.connect(positions.append)
+    worker.telemetry.connect(telemetry.append)
+    worker.finished.connect(app.quit)
+    worker.start()
+    app.exec()
+
+    assert len(positions) == 1
+    assert len(telemetry) == 1
+    assert telemetry[0]["id"] == "2297873940"
+    assert telemetry[0]["batt"] == 68.0
+    assert telemetry[0]["voltage"] == 3985.0
+    assert "lat" not in telemetry[0]
+    assert "lon" not in telemetry[0]
 
 
 def test_serial_worker_error_on_missing_port():

@@ -41,8 +41,14 @@ LoRa-приёмник (USB-UART)
 - Парсится **только** JSON — строки «таблички» (`Radio Received packet!`,
   `Postfix: OK`, загрузочный лог ESP32) игнорируются.
 - Обязательные поля: `device_id`, `lat`, `lon`; `alt` опционален.
-- Маппинг в dict приложения: `device_id → id` (с префиксом `boon`),
-  `alt → altitude`, `battery_pct → batt`, `battery_mv → voltage`,
+- Пакет с `device_id`, но **без** `lat`/`lon` — телеметрия (status, напр.
+  `{"type":"status","device_id":...}` при выключенном GPS): парсится как
+  dict без координат и уходит в сигнал `telemetry`; заряд из неё
+  обновляется и **главнее** позиции (в позиции batt=0 часто = «данных нет»).
+- Маппинг в dict приложения: `device_id → id` (**текстовый, без префикса**;
+  префикс `boon` приклеивается только при отправке payload на Traccar/Wialon
+  в `publisher.build_payload()`), `alt → altitude`, `battery_pct → batt`,
+  `battery_mv → voltage`,
   `datetime → timestamp` ("...Z") + `device_ts` (unix epoch), `sos`,
   `rssi`/`snr` → float (суффиксы отбрасываются), `ttl`/`crc` → int.
 - Валидация диапазонов — `is_valid_position()` (lat −90..90, lon −180..180,
@@ -55,7 +61,7 @@ LoRa-приёмник (USB-UART)
 | Модуль | Что делает / где править |
 |---|---|
 | `meshtrack/parser.py` | Парсинг пакетов: `parse_packet()`, `parse_queue_size()`, `is_valid_position()`. Чистый, без Qt/serial. |
-| `meshtrack/serial_worker.py` | QThread чтения serial/файла (`file://`), сигналы `position/raw_line/error/queue_size`. |
+| `meshtrack/serial_worker.py` | QThread чтения serial/файла (`file://`), сигналы `position/telemetry/raw_line/error/queue_size`. |
 | `meshtrack/app.py` | `MainWindow`: карта, панель трекеров, попапы, статус-бар, диалоги настроек/карт, обработка всех сигналов, демо-режим. Самый большой модуль. |
 | `meshtrack/repository.py` | SQLite-история: таблицы `positions`, `trackers`, retention. |
 | `meshtrack/derivation.py` | Производные метрики: GS (EMA), курс (bearing), варио, тренд. Чистые функции. |

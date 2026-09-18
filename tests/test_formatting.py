@@ -1,11 +1,11 @@
-"""Тесты format_age/display_id (`обновлён» и id трекера в UI)."""
+"""Тесты format_age («обновлён» в таблице трекеров)."""
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from meshtrack.app import display_id, format_age
+from meshtrack.app import format_age
 
 
 def _age(seconds: int) -> str:
@@ -50,14 +50,3 @@ def test_plural_forms():
     assert _age(21 * 60) == "21 минута"
     assert _age(23 * 3600) == "23 часа"
     assert _age(5 * 86400) == "5 дней"
-
-
-def test_display_id_strips_boon():
-    assert display_id("boon2297873940") == "2297873940"
-    assert display_id("boon1") == "1"
-
-
-def test_display_id_leaves_rest():
-    assert display_id("no-prefix") == "no-prefix"
-    assert display_id("") == ""
-    assert display_id("Boon5") == "Boon5"  # регистр важен

@@ -32,8 +32,8 @@ def test_position_at_all_trackers_valid():
 
 def test_position_at_moves():
     t_ref = local_midnight()
-    p1 = position_at("boon101", t_ref + 100, t_ref)
-    p2 = position_at("boon101", t_ref + 160, t_ref)
+    p1 = position_at("101", t_ref + 100, t_ref)
+    p2 = position_at("101", t_ref + 160, t_ref)
     assert (p1["lat"], p1["lon"]) != (p2["lat"], p2["lon"])
 
 
@@ -75,11 +75,11 @@ def test_altitude_varies_on_routes():
 
 def test_format_json_roundtrip_parser():
     t_ref = local_midnight()
-    pos = position_at("boon101", t_ref + 120, t_ref)
+    pos = position_at("101", t_ref + 120, t_ref)
     parsed = parse_packet(format_json(pos))
     assert parsed is not None
     assert is_valid_position(parsed)
-    assert parsed["id"] == "boon101"
+    assert parsed["id"] == "101"
     assert parsed["device_ts"] == pos["device_ts"]
     assert parsed["lat"] == pos["lat"]
     assert parsed["lon"] == pos["lon"]
@@ -119,14 +119,14 @@ def test_seed_demo_history_idempotent(tmp_path):
     assert added > 0
 
     day0 = local_midnight(now)
-    today = repo.points("boon101", ts_from=day0, ts_to=day0 + 86400)
-    yesterday = repo.points("boon101", ts_from=day0 - 86400, ts_to=day0)
+    today = repo.points("101", ts_from=day0, ts_to=day0 + 86400)
+    yesterday = repo.points("101", ts_from=day0 - 86400, ts_to=day0)
     assert len(today) > 0
     assert len(yesterday) > 0
 
     # Повторный вызов пропускает заполнение: свежая история уже есть.
     assert seed_demo_history(repo, now=now) == 0
-    assert len(repo.points("boon101", ts_from=day0, ts_to=day0 + 86400)) == len(today)
+    assert len(repo.points("101", ts_from=day0, ts_to=day0 + 86400)) == len(today)
 
 
 def test_demo_worker_emits_positions():

@@ -74,7 +74,7 @@ def main() -> int:
         grab("main.webp")
 
     def shot_popup():
-        win.web.page().runJavaScript('centerTracker("boon101")')
+        win.web.page().runJavaScript('centerTracker("101")')
         QTimer.singleShot(STEP_MS, lambda: (grab("popup.webp"), shot_maps()))
 
     def shot_maps():
