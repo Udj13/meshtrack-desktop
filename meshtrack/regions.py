@@ -75,6 +75,11 @@ PREBUILT_REGIONS: dict[str, Region] = {
         "Мордовия — Напольная Тавла / Кочкурово / Семилей",
         *bbox_around_point(54.02010, 45.40830, 15.0),
     ),
+    "innopolis": Region(
+        "innopolis",
+        "Татарстан — Иннополис, Свияжск, аэродром «Куралово»",
+        *bbox_around_point(55.75208, 48.74461, 20.0),
+    ),
     "penza_sosnovka": Region(
         "penza_sosnovka",
         "Пензенская обл. — аэродром Сосновка",
