@@ -811,6 +811,8 @@ class MainWindow(QMainWindow):
         color_mode = self._color_combo.currentData() if self._color_combo else "palette"
         if self._toolbar is not None:
             self.removeToolBar(self._toolbar)
+            self._toolbar.deleteLater()
+            self._toolbar = None
         self._setup_toolbar()
         self._filter_combo.blockSignals(True)
         self._filter_combo.setCurrentIndex(filter_index)
@@ -916,7 +918,7 @@ class MainWindow(QMainWindow):
             f"{_('Версия {v}').format(v=__version__)}<br><br>"
             f"{_('Бесплатная программа для локального отображения данных, поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.')}<br><br>"
             f"{_('Автор: Евгений Шлягин')}<br>"
-            'Почта: <a href="mailto:shlyagin@gmail.com">shlyagin@gmail.com</a>'
+            f"{_('Почта:')} <a href=\"mailto:shlyagin@gmail.com\">shlyagin@gmail.com</a>"
         )
         QMessageBox.about(self, _("О программе"), text)
 

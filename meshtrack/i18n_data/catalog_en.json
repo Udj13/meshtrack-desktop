@@ -86,6 +86,7 @@
     "Версия {v}": "Version {v}",
     "Бесплатная программа для локального отображения данных, поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.": "Free application for local display of data from a MeshTrack/Aglora LoRa tracker receiver.",
     "Автор: Евгений Шлягин": "Author: Evgeny Shlyagin",
+    "Почта:": "Email:",
 
     "MeshTrack Desktop использует следующие сторонние компоненты. Полные тексты лицензий приведены справа.": "MeshTrack Desktop uses the following third-party components. Full license texts are shown on the right.",
     "Версия:": "Version:",

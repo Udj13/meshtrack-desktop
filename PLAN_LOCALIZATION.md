@@ -57,7 +57,8 @@
 ### Фаза 4 — Web-фронт
 - `assets/web/i18n.js`: словари ru/en для строк app.js
   (попап, age, «Скрыть/Показать трек», «Данные устарели», SOS).
-- `WebBridge.getLanguage()` + сигнал `languageChanged`.
+- Язык шлётся из Python в JS через `applyLanguage(code)` (`_push_language_to_js`);
+  `WebBridge` слотов для языка не имеет.
 - `<html lang>` и пересборка строк динамически.
 
 ### Фаза 5 — сборка

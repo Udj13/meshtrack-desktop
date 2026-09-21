@@ -169,7 +169,7 @@ MeshTrack desktop/
   через `QFileDialog`). Наверх вынесен **переключатель языка** («Язык/Language»):
   выбор сохраняется в `config.json` (`language`), применяется мгновенно —
   `MainWindow.retranslate_ui()` пересобирает панель/меню/статус-бар, а в
-  QtWebEngine уходит `pushLanguage`, JS перерисовывает открытые попапы.
+  QtWebEngine вызывается `applyLanguage`, JS перерисовывает открытые попапы.
   При старте приложение подключается к `port_pref`,
   если порт доступен, иначе — к единственному присутствующему.
 - **Меню «Помощь»:** «О программе» (название MeshTrack Desktop, версия из
@@ -208,8 +208,8 @@ MeshTrack desktop/
   виджеты очищаются/пересоздаются: тулбар — с сохранением индекса фильтра и
   colour mode, меню через `menuBar().clear()`, статус-бар — перерисовкой),
   JS-часть через `assets/web/i18n.js` (`tt`/`plu`/`fmtTpl`/`applyLanguage`);
-  язык карты шлётся при загрузке страницы (`getLanguage`) и при смене
-  (`pushLanguage`). Форматирование возраста/размера (формат «N с», «1 мин 30 с»)
+  язык шлётся при старте и при смене через `applyLanguage`
+  (`MainWindow._push_language_to_js`). Форматирование возраста/размера (формат «N с», «1 мин 30 с»)
   единообразно в Python и JS.
 - **Не переводится:** логи (`logutil`), имена демо-трекеров, названия
   встроенных регионов, атрибуция карты («© OpenStreetMap…»), бренд
@@ -375,8 +375,7 @@ ID показывается рядом с псевдонимом в панели
   (форматы «N с», «1 мин 30 с», «Б/КБ/МБ/ГБ»);
 - `test_settings.py` — `language` по умолчанию/roundtrip/нормализация,
   `default_language`-подсказка (применяется только для нового конфига);
-- `test_i18n.py` — также `detect_system_language()` (локаль и env-fallback);
-- `test_bridge_units.py` — `WebBridge.getLanguage()`.
+- `test_i18n.py` — также `detect_system_language()` (локаль и env-fallback).
 
 ## 11. Traccar (опция)
 

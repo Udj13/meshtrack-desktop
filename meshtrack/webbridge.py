@@ -64,13 +64,6 @@ class WebBridge(QObject):
         return self._settings.track_color_mode
 
     @Slot(result=str)
-    def getLanguage(self) -> str:
-        """Код языка интерфейса ('ru' | 'en')."""
-        if self._settings is None:
-            return "ru"
-        return self._settings.language
-
-    @Slot(result=str)
     def getActiveMapId(self) -> str:
         """Id активной карты для URL map://{id}/{z}/{x}/{y}.png.
 

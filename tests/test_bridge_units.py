@@ -170,12 +170,3 @@ def test_get_min_max_zoom_from_mbtiles(tmp_path):
     bridge = WebBridge(settings=cfg)
     assert bridge.getMinZoom() == 10
     assert bridge.getMaxZoom() == 14
-
-
-def test_get_language_without_settings():
-    assert WebBridge().getLanguage() == "ru"
-
-
-def test_get_language_from_settings():
-    assert WebBridge(settings=FakeSettings(language="ru")).getLanguage() == "ru"
-    assert WebBridge(settings=FakeSettings(language="en")).getLanguage() == "en"
