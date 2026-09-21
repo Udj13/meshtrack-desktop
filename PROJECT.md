@@ -45,6 +45,7 @@ JSON-строки приёмника, табличный legacy-формат н�
 | Serial | pyserial | как в легаси |
 | HTTP | requests | загрузка тайлов + Traccar |
 | Тесты | pytest | unit + интеграционные без GUI |
+| Локализация | JSON-каталоги (`meshtrack/i18n.py`) | RU + EN, переключение без рестарта, pytest-проверка полноты |
 | Сборка | PyInstaller (onedir) + Inno Setup (Win) / DMG (macOS) | один установщик |
 
 Виртуальное окружение — `.venv/` **внутри корня проекта** (см. §13 команды).
@@ -90,7 +91,8 @@ JSON-строки приёмника, табличный legacy-формат н�
 | `meshtrack/exporter.py` | Экспорт треков за период в GPX/CSV (чистые функции, без Qt). |
 | `meshtrack/app.py` | MainWindow: карта + панель трекеров, статус-бар, dock-виджет лога, диалог настроек. |
 | `meshtrack/logutil.py` | Настройка логирования: файл в `app_data_dir` + `QtLogHandler` для UI. |
-| `meshtrack/settings.py` | `config.json`: traccar_on, слои, palette, retention, serial prefs. |
+| `meshtrack/settings.py` | `config.json`: traccar_on, слои, palette, retention, serial prefs, language. |
+| `meshtrack/i18n.py` | Локализация без gettext/QTranslator: `tr()`/`pl()` по JSON-каталогам `i18n_data/catalog_{ru,en}.json`; сообщение-ключ = русская строка. |
 | `meshtrack/map_manager.py` | Headless-логика карт (без Qt): сканирование, статусы, удаление файлов. |
 | `meshtrack/map_dialog.py` | Диалог «Управление картами»: список, статусы, действия (докачка, удаление, подключение). |
 | `meshtrack/demo.py` | Демо-режим (`--demo` / `MESHTRACK_DEMO=1`): `DemoWorker` с моковыми позициями и заполнение истории; моковые треки — реалистичные замкнутые маршруты (`TRACKS`: перегоны + короткие термики, меняющаяся высота); человекочитаемые имена трекеров (`TRACKER_NAMES`: АСК-21, Дискус, Бланик, Параплан); отдельная БД, по умолчанию выключен. |
@@ -109,9 +111,10 @@ MeshTrack desktop/
 ├─ meshtrack/
 │  ├─ __init__.py
 │  ├─ __main__.py        # python -m meshtrack -> app
+│  ├─ i18n_data/         # catalog_ru.json (identity) + catalog_en.json (переводы)
 │  └─ ... модули по таблице выше
 ├─ assets/
-│  └─ web/               # index.html, app.js, leaflet.(js|css) локально, icons
+│  └─ web/               # index.html, app.js, i18n.js, leaflet.(js|css) локально, icons
 ├─ tools/                # fake_serial.py, download_region.py, screenshot.py
 ├─ tests/
 └─ installer/            # PyInstaller spec, inno/dmg скрипты (git-ignored вывод)
@@ -163,7 +166,11 @@ MeshTrack desktop/
   (`first_existing_map_id`), иначе активная карта снимается (слой очищается).
 - **Диалог «Настройки»:** тумблер Traccar, порт/baud (из `list_ports`),
   retention_days, «Экспорт GPX/CSV» (все трекеры за текущий фильтр истории,
-  через `QFileDialog`). При старте приложение подключается к `port_pref`,
+  через `QFileDialog`). Наверх вынесен **переключатель языка** («Язык/Language»):
+  выбор сохраняется в `config.json` (`language`), применяется мгновенно —
+  `MainWindow.retranslate_ui()` пересобирает панель/меню/статус-бар, а в
+  QtWebEngine уходит `pushLanguage`, JS перерисовывает открытые попапы.
+  При старте приложение подключается к `port_pref`,
   если порт доступен, иначе — к единственному присутствующему.
 - **Меню «Помощь»:** «О программе» (название MeshTrack Desktop, версия из
   `__version__`, описание, автор Евгений Шлягин, почта shlyagin@gmail.com —
@@ -173,6 +180,42 @@ MeshTrack desktop/
 
 **Палитра (12 цветов, детерминированно по id):** `#e6194b #3cb44b #ffe119
 #4363d8 #f58231 #911eb4 #46f0f0 #f032e6 #bfef45 #3cb44b #808000 #9a6324`
+
+### Локализация (RU + EN)
+
+- **msgid = русская строка-источник.** Каталог перевода —
+  `meshtrack/i18n_data/catalog_{lang}.json` (`{"messages": {...}}`);
+  `catalog_ru.json` содержит только плюрал-единицы (identity), отсутствующий
+  ключ в любом языке возвращает msgid как есть.
+- **API (`meshtrack/i18n.py`, без Qt):** `init_translator(code)`,
+  `current()`, глобальные `tr(msgid)` и `pl(msgid, n)` (плюралы
+  `{one,few,many}` для ru, `{one,other}` для en; в строке формы
+  подставляется `{n}`). В модулях с UI принят импорт `from .i18n import tr as _`;
+  чистые функции (downloader/regions) тоже локализованы.
+- **Язык по умолчанию — по локали системы:** `ru` только если системный язык
+  русский, иначе `en`. В `__main__` определяется через
+  `QLocale.system()` (корректно на macOS), headless-fallback —
+  `i18n.detect_system_language()` (stdlib `locale`/переменные окружения).
+  Подсказка передаётся в `Settings(path, default_language=...)` и применяется
+  **только** при отсутствии `config.json`; существующий конфиг не трогается.
+  `init_translator()` вызывается до мастера, чтобы его страницы сразу были на
+  нужном языке.
+- **Выбор языка в мастере первого запуска:** на `WelcomePage` есть комбо
+  «Язык»; смена мгновенно переводит весь мастер (`FirstRunWizard.set_language`
+  → `retranslate()` всех страниц и кнопок) и сохраняется в `config.json` при
+  завершении. В обычном окне язык переключается в «Настройках».
+- **Замена строк на лету:** `retranslate_ui()` в `MainWindow` (логические
+  виджеты очищаются/пересоздаются: тулбар — с сохранением индекса фильтра и
+  colour mode, меню через `menuBar().clear()`, статус-бар — перерисовкой),
+  JS-часть через `assets/web/i18n.js` (`tt`/`plu`/`fmtTpl`/`applyLanguage`);
+  язык карты шлётся при загрузке страницы (`getLanguage`) и при смене
+  (`pushLanguage`). Форматирование возраста/размера (формат «N с», «1 мин 30 с»)
+  единообразно в Python и JS.
+- **Не переводится:** логи (`logutil`), имена демо-трекеров, названия
+  встроенных регионов, атрибуция карты («© OpenStreetMap…»), бренд
+  «MeshTrack Desktop»; языки в комбо показаны самодостаточно («Русский»/«English»).
+- Полнота каталога проверяется тестами (AST-сканирование `_()`/`tr()` в
+  `meshtrack/*.py` + явный набор динамических меток map_dialog, см. §10).
 
 ## 6. Входные данные (формат пакета)
 
@@ -245,7 +288,8 @@ MeshTrack desktop/
   1×1 прозрачный PNG-заглушка. Тайл, содержимое которого не является PNG
   (например, html-страница ошибки тайл-сервера, попавшая в старую карту),
   в рендер не отдаётся — считается отсутствующим (серое поле).
-- **Скачивание:** перв-запуск мастер (список предопределённых регионов или
+- **Скачивание:** перв-запуск мастер (страница приветствия с выбором языка,
+  затем список предопределённых регионов или
   произвольный bbox через мини-карту), потоковый downloader с rate-limit
   (≥ 200 мс между запросами), resume (чек-point в config), прогресс по
   файлу-мапе. Регион «город» ≈ 50–150 МБ (z 9–15). HTTP 200 с не-PNG телом
@@ -322,6 +366,18 @@ ID показывается рядом с псевдонимом в панели
 - `sos` — всплеск SOS=1 (красная подсветка).
 Сценарии описываются в код-комментах и воспроизводимы без GUI (repo+de­riv).
 
+Локализация покрывается unit-тестами (всего 180+):
+- `tests/test_i18n.py` — загрузка каталогов, плюралы (ru/en), полнота
+  `catalog_en.json` (AST-сканирование `_()`/`tr()` по `meshtrack/*.py` +
+  динамические метки `map_dialog`), JS-каталог; хелпер-фикстура `use_lang`
+  переключает глобальный переводчик (после каждого теста сбрасывается в `ru`);
+- `test_formatting.py` / `test_downloader.py` параметризованы по языкам
+  (форматы «N с», «1 мин 30 с», «Б/КБ/МБ/ГБ»);
+- `test_settings.py` — `language` по умолчанию/roundtrip/нормализация,
+  `default_language`-подсказка (применяется только для нового конфига);
+- `test_i18n.py` — также `detect_system_language()` (локаль и env-fallback);
+- `test_bridge_units.py` — `WebBridge.getLanguage()`.
+
 ## 11. Traccar (опция)
 
 - Тумблер в Настройках «Отправлять на Traccar (free-gps.ru)», **off by
@@ -364,6 +420,8 @@ Inno Setup 6 (ISCC.exe), например:  %LOCALAPPDATA%\Programs\Inno Setup 6
   перед выпуском. `OutputDir=output` → результат в `installer/win/output/`.
 - Не-PNG-тайлы/карты в поставку не входят, пользователь качает регион в
   мастере первого запуска.
+- PyInstaller `datas`: `meshtrack/i18n_data/` копируется в каталог
+  `meshtrack/i18n_data` рядом с модулями (иначе переводы исчезнут при сборке).
 
 ### Платформы и прочее
 

@@ -58,6 +58,8 @@ from .demo import DemoWorker, demo_base_point, seed_demo_history
 from .derivation import derive
 from .exporter import collect_tracks, export_csv, export_gpx
 from .first_run_wizard import run_download_map_wizard
+from .i18n import init_translator, pl
+from .i18n import tr as _
 from .licenses_dialog import LicensesDialog
 from .logutil import QtLogHandler, setup_logging
 from .map_dialog import MapManagerDialog
@@ -217,17 +219,6 @@ def app_data_dir() -> Path:
         return Path.home() / "Library" / "Application Support" / "MeshTrack"
 
 
-def _plural(n: int, one: str, few: str, many: str) -> str:
-    """Русское склонение: 1 предмет, 2 предмета, 5 предметов."""
-    n10 = n % 10
-    n100 = n % 100
-    if n10 == 1 and n100 != 11:
-        return one
-    if n10 in (2, 3, 4) and not (12 <= n100 <= 14):
-        return few
-    return many
-
-
 def format_age(ts: float | None) -> str:
     """Форматирует 'время назад' для таблицы трекеров.
 
@@ -237,6 +228,7 @@ def format_age(ts: float | None) -> str:
     >= 2 дн  -> "N дн"
 
     Уже ~2 ч и больше — без минут; 2 дня и больше — без часов.
+    Единицы берутся из каталога перевода (локализуемо).
     """
     if ts is None:
         return "—"
@@ -247,20 +239,20 @@ def format_age(ts: float | None) -> str:
     minutes = rem // 60
 
     if dt < 60:
-        return f"{dt} с"
+        return f"{dt} {pl('с', dt)}"
     if dt < 7200:  # < 2 ч — показываем минуты
         if hours:
             return (
-                f"{hours} {_plural(hours, 'час', 'часа', 'часов')} "
-                f"{minutes} {_plural(minutes, 'минута', 'минуты', 'минут')}"
+                f"{hours} {pl('час', hours)} "
+                f"{minutes} {pl('минута', minutes)}"
             )
-        return f"{minutes} {_plural(minutes, 'минута', 'минуты', 'минут')}"
+        return f"{minutes} {pl('минута', minutes)}"
     if dt < 172800:  # < 2 дн — без минут
         if not days:
-            return f"{hours} {_plural(hours, 'час', 'часа', 'часов')}"
-        hs = f" {hours} {_plural(hours, 'час', 'часа', 'часов')}" if hours else ""
-        return f"{days} {_plural(days, 'день', 'дня', 'дней')}{hs}"
-    return f"{days} {_plural(days, 'день', 'дня', 'дней')}"
+            return f"{hours} {pl('час', hours)}"
+        hs = f" {hours} {pl('час', hours)}" if hours else ""
+        return f"{days} {pl('день', days)}{hs}"
+    return f"{days} {pl('день', days)}"
 
 
 class ClickableLabel(QLabel):
@@ -295,6 +287,15 @@ class TrackerPanel(QWidget):
         "",
     ]
 
+    def _title(self) -> str:
+        return _("Трекеры")
+
+    def retranslate(self):
+        """Обновляет заголовок и шапку таблицы после смены языка."""
+        self.title.setText(self._title())
+        self.table.setHorizontalHeaderLabels([_(c) for c in self.COLUMNS])
+        self._refresh()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._trackers: dict[str, dict] = {}
@@ -306,12 +307,12 @@ class TrackerPanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        self.title = QLabel("Трекеры")
+        self.title = QLabel(self._title())
         self.title.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(self.title)
 
         self.table = QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(self.COLUMNS)
+        self.table.setHorizontalHeaderLabels([_(c) for c in self.COLUMNS])
         header = self.table.horizontalHeader()
         # Колонки можно перетаскивать мышью; «Обновлён» занимает оставшееся
         # место, последняя (кнопка «✕» удаление) — фиксированной ширины.
@@ -379,7 +380,7 @@ class TrackerPanel(QWidget):
             chip = QTableWidgetItem()
             chip.setBackground(QColor(color))
             chip.setFlags(chip.flags() & ~Qt.ItemIsSelectable)
-            chip.setToolTip(f"Цвет трекера {label}")
+            chip.setToolTip(_("Цвет трекера {label}").format(label=label))
             if self._track_visible.get(tracker_id):
                 # Трек включён — на плашке рисунок «маршрут».
                 chip.setIcon(_track_on_icon())
@@ -402,10 +403,12 @@ class TrackerPanel(QWidget):
                 QTableWidgetItem(
                     f"{vario_f:+.1f} {trend}" if vario_f is not None else "—"
                 ),
-                QTableWidgetItem(f"{alt_f:.0f} м" if alt_f is not None else "—"),
+                QTableWidgetItem(
+                    f"{alt_f:.0f} {_('м')}" if alt_f is not None else "—"
+                ),
                 QTableWidgetItem(f"{batt_f:.0f}%" if batt_f is not None else "—"),
                 QTableWidgetItem(
-                    f"{(voltage_f / 1000):.2f} В" if voltage_f is not None else "—"
+                    f"{(voltage_f / 1000):.2f} {_('В')}" if voltage_f is not None else "—"
                 ),
                 age_item,
             ]
@@ -427,7 +430,9 @@ class TrackerPanel(QWidget):
             rename_btn.setFixedSize(18, 18)
             rename_btn.setAutoRaise(True)
             rename_btn.setCursor(Qt.PointingHandCursor)
-            rename_btn.setToolTip(f"Задать/изменить псевдоним трекера {label}")
+            rename_btn.setToolTip(
+                _("Задать/изменить псевдоним трекера {label}").format(label=label)
+            )
             rename_btn.clicked.connect(partial(self._on_rename_clicked, tracker_id))
             id_lay.addWidget(name_lbl)
             id_lay.addStretch(1)
@@ -437,7 +442,7 @@ class TrackerPanel(QWidget):
             del_btn = QPushButton("✕")
             del_btn.setFixedSize(28, 22)
             del_btn.setFlat(True)
-            del_btn.setToolTip(f"Удалить все данные трекера {label}")
+            del_btn.setToolTip(_("Удалить все данные трекера {label}").format(label=label))
             del_btn.clicked.connect(partial(self._on_delete_clicked, tracker_id))
             self.table.setCellWidget(row, len(self.COLUMNS) - 1, del_btn)
 
@@ -479,24 +484,35 @@ class SettingsDialog(QDialog):
 
     def __init__(self, settings: Settings, export_cb, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Настройки")
+        self.setWindowTitle(_("Настройки"))
         self.setMinimumWidth(460)
 
         layout = QVBoxLayout(self)
 
+        # --- Язык интерфейса ---
+        lang_box = QGroupBox(_("Язык"))
+        lang_layout = QVBoxLayout(lang_box)
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItem("Русский", "ru")
+        self.lang_combo.addItem("English", "en")
+        index = self.lang_combo.findData(settings.language)
+        self.lang_combo.setCurrentIndex(index if index >= 0 else 0)
+        lang_layout.addWidget(self.lang_combo)
+        layout.addWidget(lang_box)
+
         # --- Traccar ---
-        traccar_box = QGroupBox("Traccar (опция)")
+        traccar_box = QGroupBox(_("Traccar (опция)"))
         traccar_layout = QVBoxLayout(traccar_box)
-        self.traccar_check = QCheckBox("Отправлять позиции на free-gps.ru:5055")
+        self.traccar_check = QCheckBox(_("Отправлять позиции на free-gps.ru:5055"))
         self.traccar_check.setChecked(settings.traccar_on)
         traccar_layout.addWidget(self.traccar_check)
-        traccar_hint = QLabel("По умолчанию выключено; при включении нужен интернет.")
+        traccar_hint = QLabel(_("По умолчанию выключено; при включении нужен интернет."))
         traccar_hint.setEnabled(False)
         traccar_layout.addWidget(traccar_hint)
         layout.addWidget(traccar_box)
 
         # --- Serial ---
-        serial_box = QGroupBox("Приёмник (serial)")
+        serial_box = QGroupBox(_("Приёмник (serial)"))
         serial_form = QFormLayout(serial_box)
 
         self.port_combo = QComboBox()
@@ -514,31 +530,31 @@ class SettingsDialog(QDialog):
         self.baud_combo.addItems(BAUD_CHOICES)
         self.baud_combo.setCurrentText(str(settings.baud))
 
-        serial_form.addRow("Порт:", self.port_combo)
-        serial_form.addRow("Baud:", self.baud_combo)
+        serial_form.addRow(_("Порт:"), self.port_combo)
+        serial_form.addRow(_("Baud:"), self.baud_combo)
         layout.addWidget(serial_box)
 
         # --- Данные ---
-        data_box = QGroupBox("Данные")
+        data_box = QGroupBox(_("Данные"))
         data_form = QFormLayout(data_box)
 
         self.retention_spin = QSpinBox()
         self.retention_spin.setRange(1, 3650)
-        self.retention_spin.setSuffix(" дн.")
+        self.retention_spin.setSuffix(_(" дн."))
         self.retention_spin.setValue(max(1, settings.retention_days))
-        data_form.addRow("Хранить историю:", self.retention_spin)
+        data_form.addRow(_("Хранить историю:"), self.retention_spin)
 
         export_row = QHBoxLayout()
-        gpx_btn = QPushButton("Экспорт GPX…")
-        csv_btn = QPushButton("Экспорт CSV…")
-        gpx_btn.setToolTip("Все трекеры за период текущего фильтра истории")
-        csv_btn.setToolTip("Все трекеры за период текущего фильтра истории")
+        gpx_btn = QPushButton(_("Экспорт GPX…"))
+        csv_btn = QPushButton(_("Экспорт CSV…"))
+        gpx_btn.setToolTip(_("Все трекеры за период текущего фильтра истории"))
+        csv_btn.setToolTip(_("Все трекеры за период текущего фильтра истории"))
         gpx_btn.clicked.connect(lambda: export_cb("gpx"))
         csv_btn.clicked.connect(lambda: export_cb("csv"))
         export_row.addWidget(gpx_btn)
         export_row.addWidget(csv_btn)
         export_row.addStretch(1)
-        data_form.addRow("Экспорт треков:", export_row)
+        data_form.addRow(_("Экспорт треков:"), export_row)
         layout.addWidget(data_box)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -565,6 +581,7 @@ class SettingsDialog(QDialog):
         except ValueError:
             pass
         return {
+            "language": self.lang_combo.currentData(),
             "traccar_on": self.traccar_check.isChecked(),
             "port_pref": self.port_combo.currentText().strip(),
             "baud": baud,
@@ -592,6 +609,7 @@ class MainWindow(QMainWindow):
             self.settings.save()
         except Exception:
             pass  # логирование ещё не настроено
+        init_translator(self.settings.language)
 
         # Логирование
         log_level = logging.DEBUG if debug else logging.INFO
@@ -718,17 +736,24 @@ class MainWindow(QMainWindow):
         self._data_timer.setInterval(5000)
         self._data_timer.timeout.connect(self._check_data_silence)
 
-        # Статус-бар
-        self.status_port = QLabel("Порт: нет")
-        self.status_queue = QLabel("Queue: —")
-        self.status_active = QLabel("Активных: 0")
-        self.status_map = ClickableLabel("Карта: —")
+        # Статус-бар. Состояния хранятся отдельно, тексты рендерятся по языку.
+        self._port_state = "none"  # none | connected | demo | disconnected | error
+        self._port_value = ""
+        self._queue_size: int | None = None
+        self.status_port = QLabel()
+        self.status_queue = QLabel()
+        self.status_active = QLabel()
+        self.status_map = ClickableLabel()
         self.status_map.setCursor(Qt.PointingHandCursor)
-        self.status_map.setToolTip("Управление картами")
+        self.status_map.setToolTip(_("Управление картами"))
         self.status_map.clicked.connect(self._open_map_manager)
         self.port_combo = QComboBox()
         self.port_combo.setMinimumWidth(180)
         self.port_combo.activated.connect(self._on_port_selected)
+
+        self._render_port_status()
+        self._render_queue_status()
+        self._update_active_status()
 
         self.statusBar().addWidget(self.status_port)
         self.statusBar().addWidget(self.status_queue)
@@ -746,7 +771,7 @@ class MainWindow(QMainWindow):
         self._setup_menu()
 
         # Dock-виджет с логом
-        self.log_dock = QDockWidget("Лог", self)
+        self.log_dock = QDockWidget(_("Лог"), self)
         self.log_dock.setAllowedAreas(Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea)
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
@@ -764,26 +789,63 @@ class MainWindow(QMainWindow):
         self.logger.info("WebView loadFinished ok=%s", ok)
         if ok:
             self._web_loaded = True
-            # Передать начальные фильтр и цветовой режим в JS
+            # Передать начальные фильтр, цветовой режим и язык в JS
             self._push_filter_to_js()
             self._push_color_mode_to_js()
+            self._push_language_to_js()
+
+    def _push_language_to_js(self):
+        if self._web_loaded:
+            self.web.page().runJavaScript(
+                f"applyLanguage('{self.settings.language}')"
+            )
+
+    def retranslate_ui(self):
+        """Перестраивает интерфейс окна после смены языка (без рестарта)."""
+        self.log_dock.setWindowTitle(_("Лог"))
+        self.tracker_panel.retranslate()
+        self.status_map.setToolTip(_("Управление картами"))
+
+        # Тулбар: пересоздаём, сохраняя текущий фильтр и цветовой режим.
+        filter_index = self._filter_combo.currentIndex() if self._filter_combo else 0
+        color_mode = self._color_combo.currentData() if self._color_combo else "palette"
+        if self._toolbar is not None:
+            self.removeToolBar(self._toolbar)
+        self._setup_toolbar()
+        self._filter_combo.blockSignals(True)
+        self._filter_combo.setCurrentIndex(filter_index)
+        self._filter_combo.blockSignals(False)
+        cidx = self._color_combo.findData(color_mode)
+        self._color_combo.blockSignals(True)
+        self._color_combo.setCurrentIndex(cidx if cidx >= 0 else 0)
+        self._color_combo.blockSignals(False)
+
+        # Меню пересоздаём полностью.
+        self.menuBar().clear()
+        self._setup_menu()
+
+        # Статус-бар перерисовываем из сохранённого состояния.
+        self._render_port_status()
+        self._render_queue_status()
+        self._update_active_status()
+        self._update_map_status()
 
     def _setup_toolbar(self):
-        toolbar = QToolBar("История и треки")
+        toolbar = QToolBar(_("История и треки"))
         self.addToolBar(toolbar)
         self._toolbar = toolbar
 
-        toolbar.addWidget(QLabel("История:"))
+        toolbar.addWidget(QLabel(_("История:")))
         self._filter_combo = QComboBox()
-        self._filter_combo.addItems(["Сегодня", "Вчера", "Период…"])
+        self._filter_combo.addItems([_("Сегодня"), _("Вчера"), _("Период…")])
         self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
         toolbar.addWidget(self._filter_combo)
 
-        toolbar.addWidget(QLabel("Цвет трека:"))
+        toolbar.addWidget(QLabel(_("Цвет трека:")))
         self._color_combo = QComboBox()
-        self._color_combo.addItem("Палитра", "palette")
-        self._color_combo.addItem("Высота", "altitude")
-        self._color_combo.addItem("Варио", "vario")
+        self._color_combo.addItem(_("Палитра"), "palette")
+        self._color_combo.addItem(_("Высота"), "altitude")
+        self._color_combo.addItem(_("Варио"), "vario")
         index = self._color_combo.findData(self.settings.track_color_mode)
         self._color_combo.blockSignals(True)
         self._color_combo.setCurrentIndex(index if index >= 0 else 0)
@@ -791,8 +853,8 @@ class MainWindow(QMainWindow):
         self._color_combo.currentIndexChanged.connect(self._on_color_mode_changed)
         toolbar.addWidget(self._color_combo)
 
-        clear_btn = QPushButton("Очистить историю")
-        clear_btn.setToolTip("Удалить все сохранённые позиции")
+        clear_btn = QPushButton(_("Очистить историю"))
+        clear_btn.setToolTip(_("Удалить все сохранённые позиции"))
         clear_btn.clicked.connect(self._on_clear_history)
         toolbar.addWidget(clear_btn)
 
@@ -803,42 +865,46 @@ class MainWindow(QMainWindow):
         """Главное меню приложения."""
         menu_bar = self.menuBar()
 
-        map_menu = menu_bar.addMenu("Карта")
-        download_action = map_menu.addAction("Загрузить новую карту…")
-        download_action.setStatusTip("Скачать дополнительный регион для офлайн-карт")
+        map_menu = menu_bar.addMenu(_("Карта"))
+        download_action = map_menu.addAction(_("Загрузить новую карту…"))
+        download_action.setStatusTip(_("Скачать дополнительный регион для офлайн-карт"))
         download_action.triggered.connect(self._on_download_map)
-        manage_action = map_menu.addAction("Управление картами…")
-        manage_action.setStatusTip("Список карт, статусы, удаление, докачка")
+        manage_action = map_menu.addAction(_("Управление картами…"))
+        manage_action.setStatusTip(_("Список карт, статусы, удаление, докачка"))
         manage_action.triggered.connect(self._open_map_manager)
 
-        data_menu = menu_bar.addMenu("Данные")
-        settings_action = QAction("Настройки…", self)
+        data_menu = menu_bar.addMenu(_("Данные"))
+        settings_action = QAction(_("Настройки…"), self)
         settings_action.setShortcut("Ctrl+,")
+        # На macOS HIG требует, чтобы настройки были в меню приложения; задаём
+        # роль явно, иначе Qt угадывает по тексту и поведение зависит от языка.
+        settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
         settings_action.triggered.connect(self._open_settings)
         data_menu.addAction(settings_action)
         data_menu.addSeparator()
-        gpx_action = data_menu.addAction("Экспорт GPX…")
+        gpx_action = data_menu.addAction(_("Экспорт GPX…"))
         gpx_action.triggered.connect(lambda: self._export_tracks("gpx"))
-        csv_action = data_menu.addAction("Экспорт CSV…")
+        csv_action = data_menu.addAction(_("Экспорт CSV…"))
         csv_action.triggered.connect(lambda: self._export_tracks("csv"))
         data_menu.addSeparator()
 
         # Быстрое включение/выключение моковых данных без перезапуска.
-        self._demo_action = QAction("Демо-режим (тестовые данные)", self)
+        self._demo_action = QAction(_("Демо-режим (тестовые данные)"), self)
         self._demo_action.setCheckable(True)
         self._demo_action.setStatusTip(
-            "Моковые позиции вместо serial-приёмника; отключается снятием галки"
+            _("Моковые позиции вместо serial-приёмника; отключается снятием галки")
         )
         self._demo_action.setChecked(self._demo)
         self._demo_action.toggled.connect(self._on_demo_toggled)
         data_menu.addAction(self._demo_action)
 
-        help_menu = menu_bar.addMenu("Помощь")
-        about_action = help_menu.addAction("О программе")
-        about_action.setStatusTip("Информация о MeshTrack Desktop")
+        help_menu = menu_bar.addMenu(_("Помощь"))
+        about_action = help_menu.addAction(_("О программе"))
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        about_action.setStatusTip(_("Информация о MeshTrack Desktop"))
         about_action.triggered.connect(self._show_about)
-        licenses_action = help_menu.addAction("Лицензии компонентов")
-        licenses_action.setStatusTip("Сторонние компоненты, версии и тексты лицензий")
+        licenses_action = help_menu.addAction(_("Лицензии компонентов"))
+        licenses_action.setStatusTip(_("Сторонние компоненты, версии и тексты лицензий"))
         licenses_action.triggered.connect(self._show_licenses)
 
     def _show_about(self):
@@ -847,13 +913,12 @@ class MainWindow(QMainWindow):
 
         text = (
             "<h3>MeshTrack Desktop</h3>"
-            f"Версия {__version__}<br><br>"
-            "Бесплатная программа для локального отображения данных, "
-            "поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.<br><br>"
-            "Автор: Евгений Шлягин<br>"
+            f"{_('Версия {v}').format(v=__version__)}<br><br>"
+            f"{_('Бесплатная программа для локального отображения данных, поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.')}<br><br>"
+            f"{_('Автор: Евгений Шлягин')}<br>"
             'Почта: <a href="mailto:shlyagin@gmail.com">shlyagin@gmail.com</a>'
         )
-        QMessageBox.about(self, "О программе", text)
+        QMessageBox.about(self, _("О программе"), text)
 
     def _show_licenses(self):
         """Диалог со списком сторонних компонентов и текстами лицензий."""
@@ -873,11 +938,13 @@ class MainWindow(QMainWindow):
         old_port = self.settings.port_pref
         old_baud = self.settings.baud
         retention_changed = values["retention_days"] != self.settings.retention_days
+        lang_changed = values["language"] != self.settings.language
 
         self.settings.traccar_on = values["traccar_on"]
         self.settings.port_pref = values["port_pref"]
         self.settings.baud = values["baud"]
         self.settings.retention_days = values["retention_days"]
+        self.settings.language = values["language"]
         try:
             self.settings.save()
         except Exception:
@@ -885,12 +952,18 @@ class MainWindow(QMainWindow):
 
         self.publisher.enable = self.settings.traccar_on and not self._demo
         self.logger.info(
-            "Настройки: Traccar=%s, порт=%s, baud=%d, retention=%d дн.",
+            "Настройки: Traccar=%s, порт=%s, baud=%d, retention=%d дн., язык=%s",
             "вкл" if self.settings.traccar_on else "выкл",
             self.settings.port_pref or "—",
             self.settings.baud,
             self.settings.retention_days,
+            self.settings.language,
         )
+
+        if lang_changed:
+            init_translator(self.settings.language)
+            self.retranslate_ui()
+            self._push_language_to_js()
 
         if retention_changed:
             try:
@@ -921,7 +994,7 @@ class MainWindow(QMainWindow):
             tracks = collect_tracks(self.repo, ts_from=ts_from, ts_to=ts_to)
         except Exception:
             self.logger.exception("Ошибка выборки треков для экспорта")
-            QMessageBox.critical(parent, "Экспорт", "Не удалось прочитать историю.")
+            QMessageBox.critical(parent, _("Экспорт"), _("Не удалось прочитать историю."))
             return
 
         total = sum(len(points) for points in tracks.values())
@@ -936,7 +1009,7 @@ class MainWindow(QMainWindow):
                 "Экспорт %s: нет данных за период %s", fmt.upper(), range_str
             )
             QMessageBox.information(
-                parent, "Экспорт", "За выбранный период нет данных."
+                parent, _("Экспорт"), _("За выбранный период нет данных.")
             )
             return
         self.logger.info(
@@ -952,7 +1025,7 @@ class MainWindow(QMainWindow):
         default_name = time.strftime("meshtrack_%Y%m%d_%H%M.") + ext
         file_filter = "GPX (*.gpx)" if ext == "gpx" else "CSV (*.csv)"
         path, _ = QFileDialog.getSaveFileName(
-            parent, "Экспорт треков", str(Path(start_dir) / default_name), file_filter
+            parent, _("Экспорт треков"), str(Path(start_dir) / default_name), file_filter
         )
         if not path:
             return
@@ -966,7 +1039,7 @@ class MainWindow(QMainWindow):
                 count = export_csv(path, tracks)
         except Exception:
             self.logger.exception("Ошибка экспорта %s", path)
-            QMessageBox.critical(parent, "Экспорт", "Не удалось сохранить файл.")
+            QMessageBox.critical(parent, _("Экспорт"), _("Не удалось сохранить файл."))
             return
 
         self.settings.exports_dir = str(Path(path).parent)
@@ -1038,7 +1111,7 @@ class MainWindow(QMainWindow):
 
     def _select_period_dialog(self):
         dlg = QDialog(self)
-        dlg.setWindowTitle("Выберите период")
+        dlg.setWindowTitle(_("Выберите период"))
         layout = QVBoxLayout(dlg)
 
         now = QDateTime.currentDateTime()
@@ -1050,9 +1123,9 @@ class MainWindow(QMainWindow):
         to_edit.setDisplayFormat("dd.MM.yyyy hh:mm")
 
         form = QHBoxLayout()
-        form.addWidget(QLabel("С:"))
+        form.addWidget(QLabel(_("С:")))
         form.addWidget(from_edit)
-        form.addWidget(QLabel("По:"))
+        form.addWidget(QLabel(_("По:")))
         form.addWidget(to_edit)
         layout.addLayout(form)
 
@@ -1099,8 +1172,8 @@ class MainWindow(QMainWindow):
     def _on_clear_history(self):
         reply = QMessageBox.question(
             self,
-            "Очистить историю",
-            "Удалить все сохранённые позиции трекеров?\nТекущие маркеры останутся на карте до закрытия.",
+            _("Очистить историю"),
+            _("Удалить все сохранённые позиции трекеров?\nТекущие маркеры останутся на карте до закрытия."),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1124,7 +1197,7 @@ class MainWindow(QMainWindow):
             self.logger.exception("Не удалось получить список портов")
             ports = []
 
-        self.port_combo.addItem("Выбрать порт…")
+        self.port_combo.addItem(_("Выбрать порт…"))
         for p in ports:
             self.port_combo.addItem(p)
 
@@ -1183,8 +1256,9 @@ class MainWindow(QMainWindow):
         self._worker = SerialWorker(port, baud=baud, parent=self)
         self._attach_worker(self._worker)
 
-        self.status_port.setText(f"Порт: {port}")
-        self.status_port.setStyleSheet("color: green;")
+        self._port_state = "connected"
+        self._port_value = port
+        self._render_port_status()
 
     def _on_demo_toggled(self, enabled: bool):
         if enabled:
@@ -1225,8 +1299,8 @@ class MainWindow(QMainWindow):
         )
         self._attach_worker(self._demo_worker)
 
-        self.status_port.setText("Порт: ДЕМО")
-        self.status_port.setStyleSheet("color: #b8860b;")
+        self._port_state = "demo"
+        self._render_port_status()
         self.logger.info(
             "Демо-режим включён: генерируются тестовые позиции (центр %.5f, %.5f)",
             base_lat,
@@ -1249,15 +1323,15 @@ class MainWindow(QMainWindow):
         self._demo_worker.stop()
         self._demo_worker = None
         self._data_timer.stop()
-        self.status_port.setText("Порт: нет")
-        self.status_port.setStyleSheet("color: gray;")
+        self._port_state = "none"
+        self._render_port_status()
         self.logger.info("Демо-режим выключен")
 
     def _on_worker_finished(self):
         self.logger.info("Поток данных завершён")
         self._data_timer.stop()
-        self.status_port.setText("Порт: отключён")
-        self.status_port.setStyleSheet("color: gray;")
+        self._port_state = "disconnected"
+        self._render_port_status()
 
     def _handle_position(self, pos: dict):
         # ts — время с устройства; recv_ts — время приёма на ПК
@@ -1388,12 +1462,36 @@ class MainWindow(QMainWindow):
             self.tracker_panel.update_tracker(pos)
             self.bridge.pushPosition(pos)
 
+    def _render_port_status(self):
+        if self._port_state == "demo":
+            self.status_port.setText(_("Порт: ДЕМО"))
+            self.status_port.setStyleSheet("color: #b8860b;")
+        elif self._port_state == "connected":
+            self.status_port.setText(_("Порт: {port}").format(port=self._port_value))
+            self.status_port.setStyleSheet("color: green;")
+        elif self._port_state == "error":
+            self.status_port.setText(_("Порт: ошибка"))
+            self.status_port.setStyleSheet("color: red;")
+        elif self._port_state == "disconnected":
+            self.status_port.setText(_("Порт: отключён"))
+            self.status_port.setStyleSheet("color: gray;")
+        else:
+            self.status_port.setText(_("Порт: нет"))
+            self.status_port.setStyleSheet("color: gray;")
+
+    def _render_queue_status(self):
+        if self._queue_size is None:
+            self.status_queue.setText(_("Queue: —"))
+        else:
+            self.status_queue.setText(_("Queue: {n}").format(n=self._queue_size))
+
     def _handle_queue_size(self, size: int):
-        self.status_queue.setText(f"Queue: {size}")
+        self._queue_size = size
+        self._render_queue_status()
 
     def _handle_serial_error(self, msg: str):
-        self.status_port.setText("Порт: ошибка")
-        self.status_port.setStyleSheet("color: red;")
+        self._port_state = "error"
+        self._render_port_status()
         self.logger.error("Serial error: %s", msg)
 
     def _active_worker(self):
@@ -1429,7 +1527,7 @@ class MainWindow(QMainWindow):
 
     def _update_active_status(self):
         active = self.repo.active_trackers(max_age_s=300)
-        self.status_active.setText(f"Активных: {len(active)}")
+        self.status_active.setText(_("Активных: {n}").format(n=len(active)))
 
     def _restore_trackers_from_history(self):
         """Заполняет левый список и bridge последними позициями из БД.
@@ -1460,13 +1558,13 @@ class MainWindow(QMainWindow):
     def _update_map_status(self):
         map_id = self.settings.active_map_id
         if not map_id:
-            self.status_map.setText("Карта: нет")
+            self.status_map.setText(_("Карта: нет"))
             return
         path = self.settings.get_map_path(map_id)
         if not path or not Path(path).exists():
-            self.status_map.setText(f"Карта: {map_id} (файл не найден)")
+            self.status_map.setText(_("Карта: {map_id} (файл не найден)").format(map_id=map_id))
             return
-        self.status_map.setText(f"Карта: {map_id}")
+        self.status_map.setText(_("Карта: {map_id}").format(map_id=map_id))
 
     def _on_tracker_clicked(self, tracker_id: str):
         # Одиночный клик: только центрируем карту и показываем попап.
@@ -1492,9 +1590,11 @@ class MainWindow(QMainWindow):
             label = last["name"]
         reply = QMessageBox.question(
             self,
-            "Удалить трекер",
-            f"Удалить все данные трекера «{label}» ({tracker_id})?\n"
-            "Все позиции, треки и маркер будут удалены безвозвратно.",
+            _("Удалить трекер"),
+            _(
+                "Удалить все данные трекера «{label}» ({tracker_id})?\n"
+                "Все позиции, треки и маркер будут удалены безвозвратно."
+            ).format(label=label, tracker_id=tracker_id),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1519,9 +1619,11 @@ class MainWindow(QMainWindow):
         label = tracker_id
         text, ok = QInputDialog.getText(
             self,
-            "Псевдоним трекера",
-            f"Псевдоним для {tracker_id}\n"
-            "(оставьте поле пустым, чтобы убрать псевдоним):",
+            _("Псевдоним трекера"),
+            _(
+                "Псевдоним для {tracker_id}\n"
+                "(оставьте поле пустым, чтобы убрать псевдоним):"
+            ).format(tracker_id=tracker_id),
             text=current,
         )
         if not ok:
@@ -1530,8 +1632,10 @@ class MainWindow(QMainWindow):
         if new == "" and current:
             reply = QMessageBox.question(
                 self,
-                "Убрать псевдоним",
-                f"Убрать псевдоним «{current}» у трекера {tracker_id}?",
+                _("Убрать псевдоним"),
+                _("Убрать псевдоним «{current}» у трекера {tracker_id}?").format(
+                    current=current, tracker_id=tracker_id
+                ),
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No,
             )

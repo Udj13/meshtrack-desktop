@@ -19,16 +19,20 @@ DEFAULT_CONFIG = {
     "port_pref": "",
     "baud": 115200,
     "exports_dir": "",
+    "language": "ru",  # ru | en
 }
 
 VALID_COLOR_MODES = ("palette", "altitude", "vario")
+
+from .i18n import LANGUAGES as VALID_LANGUAGES  # noqa: E402
 
 
 class Settings:
     """JSON-конфиг приложения с ленивой загрузкой и сохранением."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, default_language: str | None = None):
         self.path = Path(path)
+        self._default_language = default_language
         self._config: dict = {}
         self.load()
 
@@ -46,6 +50,9 @@ class Settings:
                 self._config = dict(DEFAULT_CONFIG)
         else:
             self._config = dict(DEFAULT_CONFIG)
+            # Язык нового пользователя — по локали системы, а не жёстко ru.
+            if self._default_language:
+                self._config["language"] = self._default_language
         self._normalize()
 
     def save(self) -> None:
@@ -80,6 +87,11 @@ class Settings:
             m for m in self._config["maps"]
             if isinstance(m, dict) and m.get("id") and m.get("path")
         ]
+        self._config["language"] = (
+            self._config.get("language")
+            if self._config.get("language") in VALID_LANGUAGES
+            else "ru"
+        )
 
     @property
     def retention_days(self) -> int:
@@ -141,6 +153,17 @@ class Settings:
     @exports_dir.setter
     def exports_dir(self, value: str) -> None:
         self._config["exports_dir"] = str(value or "")
+
+    @property
+    def language(self) -> str:
+        """Язык интерфейса ('ru' | 'en')."""
+        return self._config.get("language", "ru")
+
+    @language.setter
+    def language(self, value: str) -> None:
+        if value not in VALID_LANGUAGES:
+            value = "ru"
+        self._config["language"] = value
 
     @property
     def maps(self) -> list[dict]:

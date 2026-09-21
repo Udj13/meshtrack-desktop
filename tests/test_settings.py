@@ -73,6 +73,45 @@ def test_phase5_invalid_baud_normalized(tmp_path: Path):
     assert cfg.port_pref == ""
 
 
+def test_language_default(tmp_path: Path):
+    cfg = Settings(tmp_path / "nonexistent.json")
+    assert cfg.language == "ru"
+
+
+def test_language_roundtrip(tmp_path: Path):
+    path = tmp_path / "config.json"
+    cfg = Settings(path)
+    cfg.language = "en"
+    cfg.save()
+
+    cfg2 = Settings(path)
+    assert cfg2.language == "en"
+
+
+def test_invalid_language_normalized(tmp_path: Path):
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({"language": "de"}), encoding="utf-8")
+    cfg = Settings(path)
+    assert cfg.language == "ru"
+
+
+def test_new_config_uses_default_language_hint(tmp_path: Path):
+    cfg = Settings(tmp_path / "nonexistent.json", default_language="en")
+    assert cfg.language == "en"
+
+
+def test_existing_config_ignores_language_hint(tmp_path: Path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"language": "ru"}), encoding="utf-8")
+    cfg = Settings(path, default_language="en")
+    assert cfg.language == "ru"
+
+
+def test_invalid_default_language_hint_falls_back_to_ru(tmp_path: Path):
+    cfg = Settings(tmp_path / "nonexistent.json", default_language="de")
+    assert cfg.language == "ru"
+
+
 def test_maps_roundtrip(tmp_path: Path):
     path = tmp_path / "config.json"
     cfg = Settings(path)

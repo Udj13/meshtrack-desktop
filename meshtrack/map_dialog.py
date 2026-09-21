@@ -34,6 +34,7 @@ from .first_run_wizard import (
     FirstRunWizard,
     OPENTOPOMAP_TEMPLATE,
 )
+from .i18n import tr as _
 from .map_manager import (
     CORRUPTED,
     DOWNLOADED,
@@ -84,13 +85,13 @@ class MapManagerDialog(QDialog):
         self._thread: DownloadThread | None = None
         self._entries: list[MapEntry] = []
 
-        self.setWindowTitle("Управление картами")
+        self.setWindowTitle(_("Управление картами"))
         self.resize(920, 480)
 
         layout = QVBoxLayout(self)
 
         self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(COLUMNS)
+        self.table.setHorizontalHeaderLabels([_(c) for c in COLUMNS])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
@@ -100,16 +101,16 @@ class MapManagerDialog(QDialog):
         layout.addWidget(self.table)
 
         buttons = QHBoxLayout()
-        refresh_btn = QPushButton("Обновить")
+        refresh_btn = QPushButton(_("Обновить"))
         refresh_btn.clicked.connect(self._refresh)
         buttons.addWidget(refresh_btn)
 
-        new_region_btn = QPushButton("Скачать новый регион…")
+        new_region_btn = QPushButton(_("Скачать новый регион…"))
         new_region_btn.clicked.connect(self._download_new_region)
         buttons.addWidget(new_region_btn)
 
         buttons.addStretch(1)
-        close_btn = QPushButton("Закрыть")
+        close_btn = QPushButton(_("Закрыть"))
         close_btn.clicked.connect(self.accept)
         buttons.addWidget(close_btn)
         layout.addLayout(buttons)
@@ -130,7 +131,7 @@ class MapManagerDialog(QDialog):
             self._set_item(row, 2, self._format_zoom(entry))
             self._set_item(row, 3, _format_size(entry.size_bytes) if entry.size_bytes else "—")
             self._set_item(row, 4, self._format_tiles(entry))
-            self._set_item(row, 5, STATUS_LABELS.get(entry.status, entry.status))
+            self._set_item(row, 5, _(STATUS_LABELS.get(entry.status, entry.status)))
             self._set_item(row, 6, "✓" if entry.map_id == active_id else "")
             self.table.setCellWidget(row, 7, self._action_widget(row, entry))
 
@@ -168,7 +169,7 @@ class MapManagerDialog(QDialog):
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(4)
         for label, action in ACTIONS.get(entry.status, []):
-            btn = QPushButton(label)
+            btn = QPushButton(_(label))
             btn.clicked.connect(lambda _=False, a=action, r=row: self._on_action(a, r))
             layout.addWidget(btn)
         layout.addStretch(1)
@@ -202,14 +203,14 @@ class MapManagerDialog(QDialog):
     def _delete(self, entry: MapEntry):
         size = _format_size(entry.size_bytes) if entry.size_bytes else ""
         was_active = self._settings.active_map_id == entry.map_id
-        msg = f"Удалить карту «{entry.name}»?"
+        msg = _("Удалить карту «{name}»?").format(name=entry.name)
         if size:
-            msg += f"\nРазмер: {size}"
+            msg += _("\nРазмер: {size}").format(size=size)
         if was_active:
-            msg += "\nКарта активна — будет автоматически выбрана другая."
+            msg += _("\nКарта активна — будет автоматически выбрана другая.")
         reply = QMessageBox.question(
             self,
-            "Удаление карты",
+            _("Удаление карты"),
             msg,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -266,7 +267,7 @@ class MapManagerDialog(QDialog):
         bbox = map_bbox(entry)
         if bbox is None:
             QMessageBox.warning(
-                self, "Докачка", "Нет данных о границах области для докачки."
+                self, _("Докачка"), _("Нет данных о границах области для докачки.")
             )
             return
         zmin = entry.zmin or 9
@@ -279,9 +280,9 @@ class MapManagerDialog(QDialog):
         self._thread = thread
 
         progress = QProgressDialog(
-            f"Докачка: {entry.name}…", "Отмена", 0, 100, self
+            _("Докачка: {name}…").format(name=entry.name), _("Отмена"), 0, 100, self
         )
-        progress.setWindowTitle("Докачка карты")
+        progress.setWindowTitle(_("Докачка карты"))
         progress.setWindowModality(Qt.WindowModal)
         progress.setAutoClose(False)
         progress.setAutoReset(False)
@@ -313,7 +314,7 @@ class MapManagerDialog(QDialog):
 
         def on_error(msg: str):
             progress.close()
-            QMessageBox.critical(self, "Ошибка докачки", msg)
+            QMessageBox.critical(self, _("Ошибка докачки"), msg)
             self._refresh()
 
         thread.finished_ok.connect(on_finished)

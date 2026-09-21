@@ -124,9 +124,10 @@ def test_clear_history():
 
 
 class FakeSettings:
-    def __init__(self, maps=None, active=None):
+    def __init__(self, maps=None, active=None, language="ru"):
         self._maps = maps or []
         self.active_map_id = active
+        self.language = language
 
     @property
     def has_maps(self):
@@ -169,3 +170,12 @@ def test_get_min_max_zoom_from_mbtiles(tmp_path):
     bridge = WebBridge(settings=cfg)
     assert bridge.getMinZoom() == 10
     assert bridge.getMaxZoom() == 14
+
+
+def test_get_language_without_settings():
+    assert WebBridge().getLanguage() == "ru"
+
+
+def test_get_language_from_settings():
+    assert WebBridge(settings=FakeSettings(language="ru")).getLanguage() == "ru"
+    assert WebBridge(settings=FakeSettings(language="en")).getLanguage() == "en"

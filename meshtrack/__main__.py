@@ -4,12 +4,21 @@ import logging
 import os
 import sys
 
+from PySide6.QtCore import QLocale
 from PySide6.QtWidgets import QApplication
 
 from .app import MainWindow, app_data_dir
 from .first_run_wizard import run_first_run_wizard
+from .i18n import init_translator
 from .mapscheme import register_map_scheme
 from .settings import Settings
+
+
+def _detect_language() -> str:
+    """Язык нового пользователя: 'ru' только для русской системы, иначе 'en'."""
+    if QLocale.system().language() == QLocale.Language.Russian:
+        return "ru"
+    return "en"
 
 
 def main():
@@ -38,7 +47,9 @@ def main():
     # Проверяем наличие карт до создания главного окна.
     data_dir = app_data_dir()
     data_dir.mkdir(parents=True, exist_ok=True)
-    settings = Settings(data_dir / "config.json")
+    settings = Settings(data_dir / "config.json", default_language=_detect_language())
+    # До мастера первого запуска — чтобы его страницы были на нужном языке.
+    init_translator(settings.language)
     if not settings.has_maps:
         ok = run_first_run_wizard(settings, data_dir / "maps")
         if not ok:

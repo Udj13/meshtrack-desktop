@@ -64,6 +64,7 @@ LoRa-приёмник (USB-UART)
 | `meshtrack/serial_worker.py` | QThread чтения serial/файла (`file://`), сигналы `position/telemetry/raw_line/error/queue_size`. |
 | `meshtrack/app.py` | `MainWindow`: карта, панель трекеров, попапы, статус-бар, диалоги настроек/карт, обработка всех сигналов, демо-режим. Самый большой модуль. |
 | `meshtrack/repository.py` | SQLite-история: таблицы `positions`, `trackers`, retention. |
+| `meshtrack/i18n.py` (+ `i18n_data/catalog_{ru,en}.json`) | Локализация: `tr()`/`pl()` с msgid=русская строка; `init_translator()` в MainWindow; переключение языка в настройках и на WelcomePage мастера; язык по умолчанию — по локали ОС (ru только для русской, иначе en). |
 | `meshtrack/derivation.py` | Производные метрики: GS (EMA), курс (bearing), варио, тренд. Чистые функции. |
 | `meshtrack/webbridge.py` | QObject-мост Python↔JS (`pushPosition`, `setTrack`, ...). |
 | `assets/web/` | Фронт карты: `index.html`, `app.js`, Leaflet локально. |
@@ -79,7 +80,7 @@ LoRa-приёмник (USB-UART)
 ## Тесты и команды
 
 ```bash
-.venv/bin/python -m pytest -q        # все тесты (130+)
+.venv/bin/python -m pytest -q        # все тесты (180+)
 .venv/bin/python -m meshtrack        # запуск приложения
 .venv/bin/python -m meshtrack --demo # демо-режим без приёмника
 .venv/bin/python tools/fake_serial.py --scenario circle --count 5 --output /tmp/f.txt

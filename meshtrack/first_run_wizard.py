@@ -1,7 +1,7 @@
 """First-run мастер загрузки офлайн-карт.
 
 QWizard с четырьмя страницами:
-1. Приветствие.
+1. Приветствие (и выбор языка интерфейса с live-переводом мастера).
 2. Выбор региона (встроенный список или пользовательский bbox).
 3. Прогресс скачивания.
 4. Завершение.
@@ -16,7 +16,9 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -32,6 +34,8 @@ from PySide6.QtWidgets import (
 
 from . import downloader, regions
 from .downloader import estimate_tile_count
+from .i18n import DEFAULT_LANG, LANGUAGES, init_translator
+from .i18n import tr as _
 from .mapstore import MapStore
 from .settings import Settings
 
@@ -89,29 +93,62 @@ class DownloadThread(QThread):
 class WelcomePage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setTitle("Добро пожаловать в MeshTrack")
-        self.setSubTitle(
-            "Для работы офлайн необходимо загрузить топографическую карту региона."
-        )
+
+        self._lang_label = QLabel(_("Язык"))
+        self._lang_combo = QComboBox()
+        # Названия языков — самодостаточно, без перевода.
+        self._lang_combo.addItem("Русский", "ru")
+        self._lang_combo.addItem("English", "en")
+        self._lang_combo.currentIndexChanged.connect(self._on_language_changed)
+
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(self._lang_label)
+        lang_row.addWidget(self._lang_combo)
+        lang_row.addStretch(1)
+
+        self._intro = QLabel()
+        self._intro.setWordWrap(True)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel(
+        layout.addLayout(lang_row)
+        layout.addWidget(self._intro)
+        layout.addStretch()
+        self.retranslate()
+
+    def set_language(self, code: str) -> None:
+        """Выставляет комбо без срабатывания сигнала."""
+        index = self._lang_combo.findData(code)
+        self._lang_combo.blockSignals(True)
+        self._lang_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._lang_combo.blockSignals(False)
+
+    def _on_language_changed(self):
+        code = self._lang_combo.currentData()
+        wizard = self.wizard()
+        if isinstance(wizard, FirstRunWizard):
+            wizard.set_language(code)
+
+    def retranslate(self):
+        self.setTitle(_("Добро пожаловать в MeshTrack"))
+        self.setSubTitle(
+            _("Для работы офлайн необходимо загрузить топографическую карту региона.")
+        )
+        self._lang_label.setText(_("Язык"))
+        self._intro.setText(
+            _(
                 "Выберите один из встроенных регионов или задайте собственную область. "
                 "Скачанные тайлы сохраняются локально и будут доступны без интернета."
             )
         )
-        layout.addStretch()
 
 
 class RegionPage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setTitle("Выбор региона")
-        self.setSubTitle("Укажите область для загрузки карты")
 
-        self._radio_prebuilt = QRadioButton("Встроенный регион")
+        self._radio_prebuilt = QRadioButton(_("Встроенный регион"))
         self._radio_prebuilt.setChecked(True)
-        self._radio_custom = QRadioButton("Свой bbox")
+        self._radio_custom = QRadioButton(_("Свой bbox"))
 
         self._group = QButtonGroup(self)
         self._group.addButton(self._radio_prebuilt)
@@ -136,23 +173,39 @@ class RegionPage(QWizardPage):
         self._radio_prebuilt.toggled.connect(self._update_ui)
         self._radio_custom.toggled.connect(self._update_ui)
 
+        self._lbl_south = QLabel()
+        self._lbl_north = QLabel()
+        self._lbl_west = QLabel()
+        self._lbl_east = QLabel()
+
         grid = QGridLayout()
         grid.addWidget(self._radio_prebuilt, 0, 0, 1, 2)
         grid.addWidget(self._list, 1, 0, 1, 2)
         grid.addWidget(self._radio_custom, 2, 0, 1, 2)
-        grid.addWidget(QLabel("Юг:"), 3, 0)
+        grid.addWidget(self._lbl_south, 3, 0)
         grid.addWidget(self._south, 3, 1)
-        grid.addWidget(QLabel("Север:"), 4, 0)
+        grid.addWidget(self._lbl_north, 4, 0)
         grid.addWidget(self._north, 4, 1)
-        grid.addWidget(QLabel("Запад:"), 5, 0)
+        grid.addWidget(self._lbl_west, 5, 0)
         grid.addWidget(self._west, 5, 1)
-        grid.addWidget(QLabel("Восток:"), 6, 0)
+        grid.addWidget(self._lbl_east, 6, 0)
         grid.addWidget(self._east, 6, 1)
 
         layout = QVBoxLayout(self)
         layout.addLayout(grid)
         layout.addStretch()
         self.setLayout(layout)
+        self.retranslate()
+
+    def retranslate(self):
+        self.setTitle(_("Выбор региона"))
+        self.setSubTitle(_("Укажите область для загрузки карты"))
+        self._radio_prebuilt.setText(_("Встроенный регион"))
+        self._radio_custom.setText(_("Свой bbox"))
+        self._lbl_south.setText(_("Юг:"))
+        self._lbl_north.setText(_("Север:"))
+        self._lbl_west.setText(_("Запад:"))
+        self._lbl_east.setText(_("Восток:"))
 
     def _update_ui(self):
         prebuilt = self._radio_prebuilt.isChecked()
@@ -169,11 +222,11 @@ class RegionPage(QWizardPage):
             west = float(self._west.text().replace(",", "."))
             east = float(self._east.text().replace(",", "."))
         except ValueError:
-            QMessageBox.warning(self, "Ошибка", "Введите числовые координаты bbox")
+            QMessageBox.warning(self, _("Ошибка"), _("Введите числовые координаты bbox"))
             return False
         ok, msg = regions.validate_bbox(south, north, west, east)
         if not ok:
-            QMessageBox.warning(self, "Ошибка", msg)
+            QMessageBox.warning(self, _("Ошибка"), msg)
             return False
         return True
 
@@ -205,15 +258,13 @@ class RegionPage(QWizardPage):
 class DownloadPage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setTitle("Загрузка карты")
-        self.setSubTitle("Идёт скачивание тайлов…")
 
         self._progress = QProgressBar()
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
 
-        self._status = QLabel("Подготовка…")
-        self._cancel_btn = QPushButton("Отменить")
+        self._status = QLabel(_("Подготовка…"))
+        self._cancel_btn = QPushButton(_("Отменить"))
         self._cancel_btn.setEnabled(False)
 
         layout = QVBoxLayout(self)
@@ -226,6 +277,15 @@ class DownloadPage(QWizardPage):
         self._result: dict | None = None
         self._cancelled = False
         self._store: MapStore | None = None
+        self.retranslate()
+
+    def retranslate(self):
+        self.setTitle(_("Загрузка карты"))
+        self.setSubTitle(_("Идёт скачивание тайлов…"))
+        self._cancel_btn.setText(_("Отменить"))
+        # Статус до старта потока («Подготовка…»)— если он ещё не запущен.
+        if self._thread is None:
+            self._status.setText(_("Подготовка…"))
 
     def initializePage(self):
         wizard = self.wizard()
@@ -235,7 +295,9 @@ class DownloadPage(QWizardPage):
         zmax = wizard.zmax
         dest = wizard.dest_path
 
-        self._status.setText(f"Регион: {map_id}\nФайл: {dest}")
+        self._status.setText(
+            _("Регион: {map_id}\nФайл: {dest}").format(map_id=map_id, dest=dest)
+        )
         self._progress.setValue(0)
 
         store = MapStore(dest)
@@ -271,11 +333,19 @@ class DownloadPage(QWizardPage):
         time_str = (
             downloader._format_time(remaining)
             if remaining is not None
-            else "подсчёт…"
+            else _("подсчёт…")
         )
         self._status.setText(
-            f"Загружено {done} из {total} тайлов\n"
-            f"{size} / ~{estimated} осталось ~{time_str}"
+            _(
+                "Загружено {done} из {total} тайлов\n"
+                "{size} / ~{estimated} осталось ~{time_str}"
+            ).format(
+                done=done,
+                total=total,
+                size=size,
+                estimated=estimated,
+                time_str=time_str,
+            )
         )
 
     def _on_finished(self, result: dict):
@@ -285,23 +355,30 @@ class DownloadPage(QWizardPage):
         size = downloader._format_size(result.get("bytes_downloaded", 0))
         elapsed = result.get("elapsed_seconds", 0)
         self._status.setText(
-            f"Готово: скачано {result['downloaded']} тайлов ({size})\n"
-            f"пропущено {result['skipped']}, ошибок {result['failed']}, "
-            f"за {downloader._format_time(elapsed)}"
+            _(
+                "Готово: скачано {n} тайлов ({size})\n"
+                "пропущено {skipped}, ошибок {failed}, за {time_str}"
+            ).format(
+                n=result["downloaded"],
+                size=size,
+                skipped=result["skipped"],
+                failed=result["failed"],
+                time_str=downloader._format_time(elapsed),
+            )
         )
         self.completeChanged.emit()
 
     def _on_error(self, msg: str):
         self._result = {"error": msg}
-        self._status.setText(f"Ошибка: {msg}")
-        QMessageBox.critical(self, "Ошибка загрузки", msg)
+        self._status.setText(_("Ошибка: {msg}").format(msg=msg))
+        QMessageBox.critical(self, _("Ошибка загрузки"), msg)
         self.completeChanged.emit()
 
     def _on_cancel(self):
         self._cancelled = True
         if self._thread is not None:
             self._thread.cancel()
-        self._status.setText("Загрузка отменена. Скачанные тайлы сохранены.")
+        self._status.setText(_("Загрузка отменена. Скачанные тайлы сохранены."))
         self._cancel_btn.setEnabled(False)
         self.completeChanged.emit()
 
@@ -317,16 +394,22 @@ class DownloadPage(QWizardPage):
 class DonePage(QWizardPage):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setTitle("Готово")
-        self.setSubTitle("Карта сохранена и готова к работе")
+        self._label = QLabel()
+        self._label.setWordWrap(True)
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel(
+        layout.addWidget(self._label)
+        layout.addStretch()
+        self.retranslate()
+
+    def retranslate(self):
+        self.setTitle(_("Готово"))
+        self.setSubTitle(_("Карта сохранена и готова к работе"))
+        self._label.setText(
+            _(
                 "Регион загружен. Теперь приложение будет использовать "
                 "офлайн-карту при отсутствии интернета."
             )
         )
-        layout.addStretch()
 
 
 class FirstRunWizard(QWizard):
@@ -342,7 +425,7 @@ class FirstRunWizard(QWizard):
     ):
         super().__init__(parent)
         self.setWindowTitle(
-            "MeshTrack — первый запуск" if show_welcome else "MeshTrack — загрузка карты"
+            _("MeshTrack — первый запуск") if show_welcome else _("MeshTrack — загрузка карты")
         )
         self.resize(640, 480)
 
@@ -367,18 +450,50 @@ class FirstRunWizard(QWizard):
         self.zmax = 15
         self.dest_path: str | None = None
 
+        self._pages: list[QWizardPage] = []
+        self._welcome_page: WelcomePage | None = None
         if show_welcome:
-            self.addPage(WelcomePage(self))
+            self._welcome_page = WelcomePage(self)
+            self.addPage(self._welcome_page)
+            self._pages.append(self._welcome_page)
         self._region_page = RegionPage(self)
         self.addPage(self._region_page)
+        self._pages.append(self._region_page)
         if preselect_region_id:
             self._region_page.preselect(preselect_region_id)
-        self.addPage(DownloadPage(self))
-        self.addPage(DonePage(self))
+        download_page = DownloadPage(self)
+        self.addPage(download_page)
+        self._pages.append(download_page)
+        done_page = DonePage(self)
+        self.addPage(done_page)
+        self._pages.append(done_page)
 
-        self.setButtonText(QWizard.FinishButton, "Готово")
-        self.setButtonText(QWizard.CancelButton, "Отмена")
+        self.setButtonText(QWizard.FinishButton, _("Готово"))
+        self.setButtonText(QWizard.CancelButton, _("Отмена"))
         self.setOption(QWizard.HaveCustomButton1, False)
+
+        if self._welcome_page is not None:
+            self._welcome_page.set_language(settings.language)
+
+    def set_language(self, code: str) -> None:
+        """Меняет язык всего мастера на лету и сохраняет выбор в настройках."""
+        if code not in LANGUAGES:
+            code = DEFAULT_LANG
+        init_translator(code)
+        self._settings.language = code
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        show_welcome = self._welcome_page is not None
+        self.setWindowTitle(
+            _("MeshTrack — первый запуск") if show_welcome else _("MeshTrack — загрузка карты")
+        )
+        self.setButtonText(QWizard.FinishButton, _("Готово"))
+        self.setButtonText(QWizard.CancelButton, _("Отмена"))
+        for page in self._pages:
+            retranslate = getattr(page, "retranslate", None)
+            if callable(retranslate):
+                retranslate()
 
     def validateCurrentPage(self):
         page = self.currentPage()

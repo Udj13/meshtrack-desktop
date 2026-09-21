@@ -12,6 +12,7 @@ datas = [
     (os.path.join(ROOT, "assets", "licenses"), "assets/licenses"),
     (os.path.join(ROOT, "assets", "wizard_watermark.png"), "assets"),
     (os.path.join(ROOT, "assets", "app-icon.png"), "assets"),
+    (os.path.join(ROOT, "meshtrack", "i18n_data"), "meshtrack/i18n_data"),
 ]
 
 hiddenimports = []

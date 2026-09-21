@@ -14,35 +14,27 @@ function colorForId(id) {
     return PALETTE[hash % PALETTE.length];
 }
 
-function plural(n, one, few, many) {
-    const n10 = n % 10;
-    const n100 = n % 100;
-    if (n10 === 1 && n100 !== 11) return one;
-    if (n10 >= 2 && n10 <= 4 && !(n100 >= 12 && n100 <= 14)) return few;
-    return many;
-}
-
 function formatAge(tsSec) {
     const dt = Math.max(0, Math.floor(Date.now() / 1000 - tsSec));
     const days = Math.floor(dt / 86400);
     const hours = Math.floor((dt % 86400) / 3600);
     const minutes = Math.floor((dt % 3600) / 60);
-    if (dt < 60) return dt + " с";
+    if (dt < 60) return dt + " " + plu("с", dt);
     if (dt < 7200) {
         if (hours > 0) {
-            return hours + " " + plural(hours, "час", "часа", "часов") + " " +
-                minutes + " " + plural(minutes, "минута", "минуты", "минут");
+            return hours + " " + plu("час", hours) + " " +
+                minutes + " " + plu("минута", minutes);
         }
-        return minutes + " " + plural(minutes, "минута", "минуты", "минут");
+        return minutes + " " + plu("минута", minutes);
     }
     if (dt < 172800) {
         if (days > 0) {
-            const hs = hours > 0 ? " " + hours + " " + plural(hours, "час", "часа", "часов") : "";
-            return days + " " + plural(days, "день", "дня", "дней") + hs;
+            const hs = hours > 0 ? " " + hours + " " + plu("час", hours) : "";
+            return days + " " + plu("день", days) + hs;
         }
-        return hours + " " + plural(hours, "час", "часа", "часов");
+        return hours + " " + plu("час", hours);
     }
-    return days + " " + plural(days, "день", "дня", "дней");
+    return days + " " + plu("день", days);
 }
 
 // --- Цветовые режимы трека ---
@@ -163,7 +155,7 @@ function buildPopupHtml(pos) {
     const id = pos.id;
     const alt = pos.altitude !== undefined && pos.altitude !== null ? pos.altitude : "—";
     const batt = pos.batt !== undefined && pos.batt !== null ? pos.batt + "%" : "—";
-    const volt = pos.voltage !== undefined && pos.voltage !== null ? (pos.voltage / 1000).toFixed(2) + " В" : "—";
+    const volt = pos.voltage !== undefined && pos.voltage !== null ? (pos.voltage / 1000).toFixed(2) + " " + tt("В") : "—";
     const sos = pos.sos === 1 || pos.sos === "1";
     const stale = Boolean(pos.stale);
     const ts = pos.ts || (Date.now() / 1000);
@@ -173,19 +165,19 @@ function buildPopupHtml(pos) {
     const vario = pos.vario_ms !== undefined && pos.vario_ms !== null ? pos.vario_ms.toFixed(1) : null;
 
     const staleHtml = stale
-        ? "<br><span style='color:gray;font-weight:bold;'>Данные устарели (>20 мин)</span>"
+        ? "<br><span style='color:gray;font-weight:bold;'>" + tt("Данные устарели (>20 мин)") + "</span>"
         : "";
     const trackLink = `<a href="#" onclick="event.preventDefault(); toggleTrack('${id}'); return false;">${
-        visibleTracks.has(id) ? "Скрыть трек" : "Показать трек"
+        visibleTracks.has(id) ? tt("Скрыть трек") : tt("Показать трек")
     }</a>`;
     return `
         <b>${pos.name || id}</b>${pos.name ? ` <span style="color:gray;font-size:11px;">(${id})</span>` : ""}<br>
-        Скорость: ${gs !== null ? gs + " км/ч" : "—"}<br>
-        Курс: ${course !== null ? course + "°" : "—"}<br>
-        Высота: ${alt} м<br>
-        Варио: ${vario !== null ? vario + " м/с " + trend : "—"}<br>
-        Заряд: ${batt} (${volt})<br>
-        Обновлено ${formatAge(ts)} назад
+        ${fmtTpl("Скорость: {v}", { v: gs !== null ? gs + " " + tt("км/ч") : "—" })}<br>
+        ${fmtTpl("Курс: {v}°", { v: course !== null ? course : "—" })}<br>
+        ${fmtTpl("Высота: {v} м", { v: alt })}<br>
+        ${fmtTpl("Варио: {v}", { v: vario !== null ? vario + " " + tt("м/с") + " " + trend : "—" })}<br>
+        ${fmtTpl("Заряд: {v} ({v2})", { v: batt, v2: volt })}<br>
+        ${fmtTpl("Обновлено {age} назад", { age: formatAge(ts) })}
         ${sos ? "<br><span style='color:red;font-weight:bold;'>SOS</span>" : ""}
         ${staleHtml}
         <br>${trackLink}

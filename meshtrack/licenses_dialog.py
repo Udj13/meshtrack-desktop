@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .i18n import tr as _
 from .licenses import COMPONENTS, load_license_text
 
 
@@ -21,13 +22,15 @@ class LicensesDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Лицензии компонентов")
+        self.setWindowTitle(_("Лицензии компонентов"))
         self.resize(900, 600)
 
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "MeshTrack Desktop использует следующие сторонние компоненты. "
-            "Полные тексты лицензий приведены справа."
+            _(
+                "MeshTrack Desktop использует следующие сторонние компоненты. "
+                "Полные тексты лицензий приведены справа."
+            )
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -61,10 +64,10 @@ class LicensesDialog(QDialog):
         parts = [
             f"<h3>{escape(comp['name'])}</h3>",
             "<p>"
-            f"<b>Версия:</b> {escape(comp['version'])}<br>"
-            f"<b>Лицензия:</b> {escape(comp['license'])}<br>"
-            f"<b>Копирайт:</b> {escape(comp['copyright'])}<br>"
-            f"<b>Сайт:</b> "
+            f"<b>{_('Версия:')}</b> {escape(comp['version'])}<br>"
+            f"<b>{_('Лицензия:')}</b> {escape(comp['license'])}<br>"
+            f"<b>{_('Копирайт:')}</b> {escape(comp['copyright'])}<br>"
+            f"<b>{_('Сайт:')}</b> "
             f'<a href="{comp["url"]}">{escape(comp["url"])}</a>'
             "</p>",
         ]
@@ -76,7 +79,9 @@ class LicensesDialog(QDialog):
             try:
                 text = load_license_text(filename)
             except OSError:
-                text = f"(Файл лицензии {filename} не найден)"
+                text = _("(Файл лицензии {filename} не найден)").format(
+                    filename=filename
+                )
             parts.append(
                 f"<pre style=\"white-space: pre-wrap; "
                 f"font-family: monospace;\">{escape(text)}</pre>"

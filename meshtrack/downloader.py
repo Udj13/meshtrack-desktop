@@ -20,6 +20,8 @@ from typing import Callable
 
 import requests
 
+from .i18n import pl
+from .i18n import tr as _
 from .mapstore import MapStore, is_valid_tile_blob
 
 logger = logging.getLogger(__name__)
@@ -160,21 +162,21 @@ class TileDownloader:
 def _format_size(bytes_count: int) -> str:
     """Возвращает читаемое представление размера (Б, КБ, МБ, ГБ)."""
     if bytes_count < 1024:
-        return f"{bytes_count} Б"
+        return f"{bytes_count} {_('Б')}"
     if bytes_count < 1024 * 1024:
-        return f"{bytes_count / 1024:.1f} КБ"
+        return f"{bytes_count / 1024:.1f} {_('КБ')}"
     if bytes_count < 1024 * 1024 * 1024:
-        return f"{bytes_count / (1024 * 1024):.1f} МБ"
-    return f"{bytes_count / (1024 * 1024 * 1024):.2f} ГБ"
+        return f"{bytes_count / (1024 * 1024):.1f} {_('МБ')}"
+    return f"{bytes_count / (1024 * 1024 * 1024):.2f} {_('ГБ')}"
 
 
 def _format_time(seconds: float) -> str:
     """Форматирует секунды в '1 мин 30 с' или '45 с'."""
     if seconds < 60:
-        return f"{int(seconds)} с"
+        return f"{int(seconds)} {pl('с', int(seconds))}"
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
-    return f"{minutes} мин {secs} с"
+    return f"{minutes} {_('мин')} {secs} {pl('с', secs)}"
 
 
 def download(

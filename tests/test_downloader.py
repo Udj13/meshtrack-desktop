@@ -256,15 +256,24 @@ def test_tile_downloader_rate_limit(store: MapStore, http_server: str):
     assert store.get(z, x, y) == FAKE_PNG
 
 
-def test_format_size():
+def test_format_size(use_lang):
+    use_lang("ru")
     assert _format_size(512) == "512 Б"
     assert _format_size(1536) == "1.5 КБ"
     assert _format_size(2 * 1024 * 1024) == "2.0 МБ"
+    use_lang("en")
+    assert _format_size(512) == "512 B"
+    assert _format_size(1536) == "1.5 KB"
+    assert _format_size(2 * 1024 * 1024) == "2.0 MB"
 
 
-def test_format_time():
+def test_format_time(use_lang):
+    use_lang("ru")
     assert _format_time(45) == "45 с"
     assert _format_time(90) == "1 мин 30 с"
+    use_lang("en")
+    assert _format_time(45) == "45 s"
+    assert _format_time(90) == "1 min 30 s"
 
 
 def test_download_rejects_html_200(store: MapStore, html_server: str):

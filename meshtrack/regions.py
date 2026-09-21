@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 
+from .i18n import tr as _
+
 
 class Region:
     """Описание региона для скачивания карт."""
@@ -111,17 +113,17 @@ def make_region_id(name: str) -> str:
 def validate_bbox(south: float, north: float, west: float, east: float) -> tuple[bool, str]:
     """Проверяет корректность bbox. Возвращает (ok, error_message)."""
     if not (-90.0 <= south <= 90.0) or not (-90.0 <= north <= 90.0):
-        return False, "Широта должна быть в диапазоне −90..90"
+        return False, _("Широта должна быть в диапазоне −90..90")
     if not (-180.0 <= west <= 180.0) or not (-180.0 <= east <= 180.0):
-        return False, "Долгота должна быть в диапазоне −180..180"
+        return False, _("Долгота должна быть в диапазоне −180..180")
     if south >= north:
-        return False, "Южная граница должна быть меньше северной"
+        return False, _("Южная граница должна быть меньше северной")
     if west >= east:
-        return False, "Западная граница должна быть меньше восточной"
+        return False, _("Западная граница должна быть меньше восточной")
     if north - south > 10.0:
-        return False, "Регион слишком велик (>10° по широте)"
+        return False, _("Регион слишком велик (>10° по широте)")
     if east - west > 10.0:
-        return False, "Регион слишком велик (>10° по долготе)"
+        return False, _("Регион слишком велик (>10° по долготе)")
     return True, ""
 
 
