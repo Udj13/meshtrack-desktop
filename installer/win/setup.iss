@@ -1,9 +1,9 @@
 ; MeshTrack Inno Setup script (Windows).
-; Собирает installer/win/output/MeshTrackSetup-0.1.0.exe из dist/MeshTrack.
+; Собирает installer/win/output/MeshTrackSetup-0.2.0.exe из dist/MeshTrack.
 ; Требования: сначала `pyinstaller installer\win\MeshTrack.spec`, затем Inno Setup 6.
 
 #define MyAppName "MeshTrack"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "MeshTrack"
 #define MyAppExeName "MeshTrack.exe"
 #define MyAppDir "..\..\dist\MeshTrack"
@@ -26,6 +26,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Минимальная ОС — Windows 10 (Python 3.12 / Qt 6 не работают на Windows 7-8.1).
+MinVersion=10.0
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"

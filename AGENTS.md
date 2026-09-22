@@ -15,7 +15,8 @@ QtWebEngine) с курсом, высотой и трендом набора/сн
 
 **Стек:** Python 3.11+, PySide6 (Qt 6 + QtWebEngine), Leaflet 1.9 (локально),
 SQLite (история) + MBTiles (карты), pyserial, requests, pytest.
-Сборка — PyInstaller (onedir) + Inno Setup (Win) / DMG (macOS).
+Сборка — PyInstaller (onedir) + Inno Setup (Win) / DMG (macOS);
+Linux — запуск из исходников (установщиков нет).
 
 ## Как работает (поток данных)
 

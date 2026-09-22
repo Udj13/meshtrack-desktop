@@ -215,8 +215,9 @@ def app_data_dir() -> Path:
     if system == "Windows":
         base = Path(os.environ.get("APPDATA", Path.home()))
         return base / "MeshTrack"
-    else:
+    if system == "Darwin":
         return Path.home() / "Library" / "Application Support" / "MeshTrack"
+    return Path.home() / ".local" / "share" / "MeshTrack"
 
 
 def format_age(ts: float | None) -> str:
@@ -242,10 +243,7 @@ def format_age(ts: float | None) -> str:
         return f"{dt} {pl('с', dt)}"
     if dt < 7200:  # < 2 ч — показываем минуты
         if hours:
-            return (
-                f"{hours} {pl('час', hours)} "
-                f"{minutes} {pl('минута', minutes)}"
-            )
+            return f"{hours} {pl('час', hours)} {minutes} {pl('минута', minutes)}"
         return f"{minutes} {pl('минута', minutes)}"
     if dt < 172800:  # < 2 дн — без минут
         if not days:
@@ -403,12 +401,12 @@ class TrackerPanel(QWidget):
                 QTableWidgetItem(
                     f"{vario_f:+.1f} {trend}" if vario_f is not None else "—"
                 ),
-                QTableWidgetItem(
-                    f"{alt_f:.0f} {_('м')}" if alt_f is not None else "—"
-                ),
+                QTableWidgetItem(f"{alt_f:.0f} {_('м')}" if alt_f is not None else "—"),
                 QTableWidgetItem(f"{batt_f:.0f}%" if batt_f is not None else "—"),
                 QTableWidgetItem(
-                    f"{(voltage_f / 1000):.2f} {_('В')}" if voltage_f is not None else "—"
+                    f"{(voltage_f / 1000):.2f} {_('В')}"
+                    if voltage_f is not None
+                    else "—"
                 ),
                 age_item,
             ]
@@ -442,7 +440,9 @@ class TrackerPanel(QWidget):
             del_btn = QPushButton("✕")
             del_btn.setFixedSize(28, 22)
             del_btn.setFlat(True)
-            del_btn.setToolTip(_("Удалить все данные трекера {label}").format(label=label))
+            del_btn.setToolTip(
+                _("Удалить все данные трекера {label}").format(label=label)
+            )
             del_btn.clicked.connect(partial(self._on_delete_clicked, tracker_id))
             self.table.setCellWidget(row, len(self.COLUMNS) - 1, del_btn)
 
@@ -506,7 +506,9 @@ class SettingsDialog(QDialog):
         self.traccar_check = QCheckBox(_("Отправлять позиции на free-gps.ru:5055"))
         self.traccar_check.setChecked(settings.traccar_on)
         traccar_layout.addWidget(self.traccar_check)
-        traccar_hint = QLabel(_("По умолчанию выключено; при включении нужен интернет."))
+        traccar_hint = QLabel(
+            _("По умолчанию выключено; при включении нужен интернет.")
+        )
         traccar_hint.setEnabled(False)
         traccar_layout.addWidget(traccar_hint)
         layout.addWidget(traccar_box)
@@ -796,9 +798,7 @@ class MainWindow(QMainWindow):
 
     def _push_language_to_js(self):
         if self._web_loaded:
-            self.web.page().runJavaScript(
-                f"applyLanguage('{self.settings.language}')"
-            )
+            self.web.page().runJavaScript(f"applyLanguage('{self.settings.language}')")
 
     def retranslate_ui(self):
         """Перестраивает интерфейс окна после смены языка (без рестарта)."""
@@ -906,7 +906,9 @@ class MainWindow(QMainWindow):
         about_action.setStatusTip(_("Информация о MeshTrack Desktop"))
         about_action.triggered.connect(self._show_about)
         licenses_action = help_menu.addAction(_("Лицензии компонентов"))
-        licenses_action.setStatusTip(_("Сторонние компоненты, версии и тексты лицензий"))
+        licenses_action.setStatusTip(
+            _("Сторонние компоненты, версии и тексты лицензий")
+        )
         licenses_action.triggered.connect(self._show_licenses)
 
     def _show_about(self):
@@ -917,8 +919,10 @@ class MainWindow(QMainWindow):
             "<h3>MeshTrack Desktop</h3>"
             f"{_('Версия {v}').format(v=__version__)}<br><br>"
             f"{_('Бесплатная программа для локального отображения данных, поступающих с приёмника LoRa-трекеров MeshTrack или Aglora.')}<br><br>"
+            f"{_('Распространяется по лицензии MIT: использование свободное, но без каких-либо гарантий.')} "
+            f'<a href="https://opensource.org/licenses/MIT">MIT</a><br><br>'
             f"{_('Автор: Евгений Шлягин')}<br>"
-            f"{_('Почта:')} <a href=\"mailto:shlyagin@gmail.com\">shlyagin@gmail.com</a>"
+            f'{_("Почта:")} <a href="mailto:shlyagin@gmail.com">shlyagin@gmail.com</a>'
         )
         QMessageBox.about(self, _("О программе"), text)
 
@@ -996,7 +1000,9 @@ class MainWindow(QMainWindow):
             tracks = collect_tracks(self.repo, ts_from=ts_from, ts_to=ts_to)
         except Exception:
             self.logger.exception("Ошибка выборки треков для экспорта")
-            QMessageBox.critical(parent, _("Экспорт"), _("Не удалось прочитать историю."))
+            QMessageBox.critical(
+                parent, _("Экспорт"), _("Не удалось прочитать историю.")
+            )
             return
 
         total = sum(len(points) for points in tracks.values())
@@ -1027,7 +1033,10 @@ class MainWindow(QMainWindow):
         default_name = time.strftime("meshtrack_%Y%m%d_%H%M.") + ext
         file_filter = "GPX (*.gpx)" if ext == "gpx" else "CSV (*.csv)"
         path, _ = QFileDialog.getSaveFileName(
-            parent, _("Экспорт треков"), str(Path(start_dir) / default_name), file_filter
+            parent,
+            _("Экспорт треков"),
+            str(Path(start_dir) / default_name),
+            file_filter,
         )
         if not path:
             return
@@ -1175,7 +1184,9 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             _("Очистить историю"),
-            _("Удалить все сохранённые позиции трекеров?\nТекущие маркеры останутся на карте до закрытия."),
+            _(
+                "Удалить все сохранённые позиции трекеров?\nТекущие маркеры останутся на карте до закрытия."
+            ),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -1358,7 +1369,11 @@ class MainWindow(QMainWindow):
         # Позиция может нести batt=0/mv=0 («нет данных»); тогда берём заряд
         # из телеметрии (status-пакет) — она достовернее позиции.
         tel = self._telemetry.get(tracker_id)
-        if (batt is None or not (1 <= batt <= 100)) and tel and tel.get("batt") is not None:
+        if (
+            (batt is None or not (1 <= batt <= 100))
+            and tel
+            and tel.get("batt") is not None
+        ):
             batt = tel["batt"]
         if not voltage and tel and tel.get("voltage") is not None:
             voltage = tel["voltage"]
@@ -1564,7 +1579,9 @@ class MainWindow(QMainWindow):
             return
         path = self.settings.get_map_path(map_id)
         if not path or not Path(path).exists():
-            self.status_map.setText(_("Карта: {map_id} (файл не найден)").format(map_id=map_id))
+            self.status_map.setText(
+                _("Карта: {map_id} (файл не найден)").format(map_id=map_id)
+            )
             return
         self.status_map.setText(_("Карта: {map_id}").format(map_id=map_id))
 

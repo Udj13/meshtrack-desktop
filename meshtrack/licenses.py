@@ -2,9 +2,12 @@
 
 Полные тексты лицензий лежат в assets/licenses/ и входят в поставку.
 """
+
 import platform
 from importlib import metadata
 from pathlib import Path
+
+from . import __version__
 
 
 def installed_version(dist_name: str, fallback: str) -> str:
@@ -16,6 +19,15 @@ def installed_version(dist_name: str, fallback: str) -> str:
 
 
 COMPONENTS = [
+    {
+        "name": "MeshTrack Desktop",
+        "version": __version__,
+        "license": "MIT",
+        "copyright": "© 2026 Udj13",
+        "url": "https://github.com/Udj13/meshtrack-desktop",
+        "files": ["mit.txt"],
+        "note": "Лицензия самого приложения (см. LICENSE в корне репозитория).",
+    },
     {
         "name": "PySide6 / Qt 6 (вкл. QtWebEngine)",
         "version": installed_version("PySide6", "6.9.3"),

@@ -19,7 +19,8 @@
 - **Аудитория:** пилоты и наземная поддержка без компьютерных навыков.
   Установка = скачать один установщик и запустить. Никаких IDE, Python,
   драйверов настраивать не нужно (кроме стандартных USB-UART драйверов ОС).
-- **Платформы:** Windows 10/11 x64, macOS 12+ (Intel и Apple Silicon).
+- **Платформы:** Windows 10/11 x64, macOS 12+ (Intel и Apple Silicon),
+  Linux (запуск из исходников; установщиков нет).
 - **Полный оффлайн:** единственная сетевая активность — (а) однократная
   загрузка карт при первом запуске, (б) опциональная отправка на Traccar
   (по умолчанию **выключена**, включается в настройках).
@@ -309,7 +310,8 @@ MeshTrack desktop/
 
   Пользователь может добавить новые bbox через Настройки (JSON-редактор).
 - **Пути хранения:** Windows `%APPDATA%/MeshTrack/`, macOS
-  `~/Library/Application Support/MeshTrack/` — `maps/*.mbtiles`, `meshtrack.db`,
+  `~/Library/Application Support/MeshTrack/`, Linux
+  `~/.local/share/MeshTrack/` — `maps/*.mbtiles`, `meshtrack.db`,
   `config.json`.
 
 ## 9. Данные (SQLite `meshtrack.db`)
@@ -429,6 +431,8 @@ Inno Setup 6 (ISCC.exe), например:  %LOCALAPPDATA%\Programs\Inno Setup 6
   - Windows → `installer/win/MeshTrack.spec` + Inno Setup script `setup.iss`
     → `MeshTrackSetup.exe`
   - macOS → `MeshTrack.spec` → `.app` → `hdiutil` → `MeshTrack.dmg`
+  - Linux → установщиков нет; только запуск из исходников (pip + PySide6,
+    системные пакеты QtWebEngine, доступ к `/dev/ttyUSB*`)
 - Подпись: нет (Gatekeeper: запуск правой-кнопкой «Открыть», SmartScreen:
   «Подробнее → Выполнить»). Документировать в README.
 - Установщик содержит: QtWebEngine, Leaflet, иконки; карты — отдельно
@@ -438,6 +442,10 @@ Inno Setup 6 (ISCC.exe), например:  %LOCALAPPDATA%\Programs\Inno Setup 6
 - **Лицензии третьих сторон:** полные тексты лежат в `assets/licenses/`
   (входят в поставку) и показываются в UI: «Помощь → Лицензии компонентов»
   (`meshtrack/licenses.py` — данные, `licenses_dialog.py` — диалог).
+- **Лицензия проекта:** MIT (`LICENSE` в корне репо). Совместима со всем
+  стеком: LGPL-3.0 (Qt/PySide6 — динамическая компоновка, пользователь может
+  заменить DLL), Apache-2.0 (requests), BSD-3 (pyserial), BSD-2 (Leaflet),
+  PSF-2.0 (Python), GPL-2.0+bootloader exception (PyInstaller: только сборка).
 
   | Компонент | Лицензия | Файл текста |
   |---|---|---|

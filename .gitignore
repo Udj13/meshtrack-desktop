@@ -6,6 +6,7 @@ dist/
 build/
 installer/dist/
 installer/win/output/
+site/
 .DS_Store
 *.mbtiles
 .ruff_cache/
