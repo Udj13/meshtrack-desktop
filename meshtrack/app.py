@@ -24,6 +24,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import (
     QApplication,
@@ -64,6 +65,7 @@ from .licenses_dialog import LicensesDialog
 from .logutil import QtLogHandler, setup_logging
 from .map_dialog import MapManagerDialog
 from .mapscheme import install_map_handler
+from .map_manager import map_bbox, map_summary, point_in_bbox, scan_maps
 from .publisher import TraccarPublisher
 from .repository import Repository
 from .serial_worker import SerialWorker
@@ -619,6 +621,14 @@ class MainWindow(QMainWindow):
         self.qt_log_handler = QtLogHandler(self)
         self.logger.addHandler(self.qt_log_handler)
 
+        # Сводка карт в лог: bbox/зум/тайлы помогают понять, почему тайлы
+        # не показываются (карта для другого региона или файла нет).
+        try:
+            for line in map_summary(self.settings, self.data_dir / "maps"):
+                self.logger.info("Карты: %s", line)
+        except Exception:
+            self.logger.exception("Ошибка сводки карт")
+
         # В демо-режиме используется отдельная БД, чтобы не засорять историю.
         db_name = "meshtrack-demo.db" if self._demo else "meshtrack.db"
         self.repo = Repository(str(self.data_dir / db_name))
@@ -712,12 +722,20 @@ class MainWindow(QMainWindow):
         page.loadFinished.connect(self._on_web_load_finished)
         self._web_loaded = False
 
+        # JS-консоль (Leaflet/пользовательский код) — в meshtrack.log:
+        # без DEBUG тоже хочется видеть ошибки и смену тайлового слоя.
+        try:
+            page.javaScriptConsoleMessage.connect(self._on_js_console)
+        except Exception:
+            self.logger.warning("Перехват JS-консоли недоступен на этой Qt")
+
         # WebChannel / bridge
         self.bridge = WebBridge(repo=self.repo, settings=self.settings, parent=self)
         self.channel = QWebChannel(self)
         self.channel.registerObject("bridge", self.bridge)
         page.setWebChannel(self.channel)
         self.bridge.trackShown.connect(self._on_track_shown)
+        self.bridge.viewChanged.connect(self._on_view_changed)
 
         # Восстанавливаем последние позиции из истории: левый список и маркеры
         # на карте появляются сразу, не дожидаясь живых пакетов.
@@ -764,6 +782,11 @@ class MainWindow(QMainWindow):
         self.statusBar().addWidget(QWidget(), 1)  # spacer
         self.statusBar().addWidget(self.port_combo)
 
+        # Состояние проверки «область вне карты» (см. _on_view_changed).
+        self._map_status_id: str | None = None
+        self._map_coverage: tuple | None = None
+        self._map_view_warning = False
+
         self._update_map_status()
 
         # Toolbar: фильтры истории и цвет треков
@@ -795,6 +818,30 @@ class MainWindow(QMainWindow):
             self._push_filter_to_js()
             self._push_color_mode_to_js()
             self._push_language_to_js()
+
+    def _on_js_console(self, level, message: str, line_number: int, source_id: str):
+        """Переносит сообщения JS-консоли из QtWebEngine в meshtrack.log.
+
+        Leaflet пишет в console.log смену тайлового слоя (map:// URL, z-лимиты),
+        ошибки парсинга — в console.error: и то и другое ценно при диагностике
+        «не показываются карты». Info-сообщения попадают в лог только c --debug.
+        """
+        try:
+            lvl = int(level)
+        except (TypeError, ValueError):
+            lvl = 0
+        src = source_id or ""
+        line = f"{message} ({src}:{line_number})" if src else message
+        if lvl == int(
+            QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel
+        ):
+            self.logger.error("JS: %s", line)
+        elif lvl == int(
+            QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel
+        ):
+            self.logger.warning("JS: %s", line)
+        else:
+            self.logger.debug("JS: %s", line)
 
     def _push_language_to_js(self):
         if self._web_loaded:
@@ -1573,17 +1620,91 @@ class MainWindow(QMainWindow):
             self.tracker_panel.update_tracker(pos)
 
     def _update_map_status(self):
+        self._map_status_id = None
+        self._map_coverage = None
         map_id = self.settings.active_map_id
         if not map_id:
+            self._map_view_warning = False
             self.status_map.setText(_("Карта: нет"))
+            self.status_map.setToolTip(_("Управление картами"))
+            self.status_map.setStyleSheet("")
             return
         path = self.settings.get_map_path(map_id)
         if not path or not Path(path).exists():
+            self._map_view_warning = False
             self.status_map.setText(
                 _("Карта: {map_id} (файл не найден)").format(map_id=map_id)
             )
+            self.status_map.setToolTip(_("Управление картами"))
+            self.status_map.setStyleSheet("")
             return
-        self.status_map.setText(_("Карта: {map_id}").format(map_id=map_id))
+        self._map_status_id = map_id
+        # Кэшируем bbox/зум активной карты: данные статичны во время работы,
+        # а moveend в JS репортит вид часто — перечитывать файл не нужно.
+        try:
+            entry = next(
+                (
+                    e
+                    for e in scan_maps(self.settings, self.data_dir / "maps")
+                    if e.map_id == map_id
+                ),
+                None,
+            )
+            if entry is not None and entry.exists:
+                bbox = map_bbox(entry)
+                if bbox is not None and entry.zmin is not None and entry.zmax is not None:
+                    self._map_coverage = (bbox, entry.zmin, entry.zmax)
+        except Exception:
+            self.logger.exception("Ошибка получения bbox активной карты")
+        self._map_view_warning = False
+        self._render_map_status()
+
+    def _render_map_status(self):
+        """Рендер статуса карты с компактной подсказкой «вне области»."""
+        map_id = self._map_status_id or ""
+        tooltip = _("Управление картами")
+        if self._map_view_warning:
+            text = _("Карта: {map_id} — вне области").format(map_id=map_id)
+            tooltip = _(
+                "Область вне карты (активная карта покрывает другой регион/зум)"
+            )
+            color = "#c0392b"
+        elif map_id:
+            text = _("Карта: {map_id}").format(map_id=map_id)
+            color = ""
+        else:
+            text = _("Карта: нет")
+            color = ""
+        self.status_map.setText(text)
+        self.status_map.setToolTip(tooltip)
+        self.status_map.setStyleSheet(f"color:{color};" if color else "")
+
+    def _on_view_changed(self, lat: float, lon: float, zoom: int):
+        """JS репортит центр/зум Leaflet — сверяем с bbox активной карты."""
+        coverage = self._map_coverage
+        if coverage is None:
+            return
+        bbox, zmin, zmax = coverage
+        warn = not (point_in_bbox(lat, lon, bbox) and zmin <= zoom <= zmax)
+        if warn != self._map_view_warning:
+            self._map_view_warning = warn
+            self._render_map_status()
+            if warn:
+                self.logger.info(
+                    "Область просмотра вне активной карты %s: lat=%.5f lon=%.5f "
+                    "zoom=%d (bbox=(%s), z=%d-%d)",
+                    self._map_status_id,
+                    lat,
+                    lon,
+                    zoom,
+                    ",".join(f"{v:.5f}" for v in bbox),
+                    zmin,
+                    zmax,
+                )
+            else:
+                self.logger.info(
+                    "Область просмотра снова в пределах карты %s", self._map_status_id
+                )
 
     def _on_tracker_clicked(self, tracker_id: str):
         # Одиночный клик: только центрируем карту и показываем попап.

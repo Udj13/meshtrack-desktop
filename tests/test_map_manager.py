@@ -16,6 +16,8 @@ from meshtrack.map_manager import (
     delete_map,
     delete_map_file,
     map_bbox,
+    map_summary,
+    point_in_bbox,
     scan_maps,
 )
 from meshtrack.mapstore import PNG_MAGIC, MapStore
@@ -189,6 +191,65 @@ def test_map_bbox_from_config(tmp_path: Path):
     )
     entry = next(e for e in scan_maps(cfg, maps_dir) if e.map_id == "custom")
     assert map_bbox(entry) == (54.0, 54.1, 45.0, 45.1)
+
+
+def test_point_in_bbox_inside():
+    assert point_in_bbox(54.05, 45.05, (54.0, 54.1, 45.0, 45.1)) is True
+
+
+def test_point_in_bbox_edges_inclusive():
+    bbox = (54.0, 54.1, 45.0, 45.1)
+    assert point_in_bbox(54.0, 45.05, bbox) is True
+    assert point_in_bbox(54.1, 45.05, bbox) is True
+    assert point_in_bbox(54.05, 45.0, bbox) is True
+    assert point_in_bbox(54.05, 45.1, bbox) is True
+
+
+def test_point_in_bbox_outside():
+    bbox = (54.0, 54.1, 45.0, 45.1)
+    assert point_in_bbox(53.9, 45.05, bbox) is False
+    assert point_in_bbox(54.2, 45.05, bbox) is False
+    assert point_in_bbox(54.05, 44.9, bbox) is False
+    assert point_in_bbox(54.05, 45.2, bbox) is False
+
+
+def test_map_summary_with_maps(tmp_path: Path):
+    maps_dir = tmp_path / "maps"
+    maps_dir.mkdir()
+    file = maps_dir / "lyambir.mbtiles"
+    _make_mbtiles(file)
+
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("lyambir", "Лямбирь", str(file))
+    cfg.active_map_id = "lyambir"
+
+    lines = map_summary(cfg, maps_dir)
+    assert any("Активная карта: lyambir" in line for line in lines)
+    assert any("bbox=(54.0,54.1,45.0,45.1)" in line for line in lines)
+    assert any("z=9-15" in line for line in lines)
+    assert any("tiles=1" in line for line in lines)
+    assert any("status=downloaded" in line for line in lines)
+
+
+def test_map_summary_no_active(tmp_path: Path):
+    maps_dir = tmp_path / "maps"
+    maps_dir.mkdir()
+    cfg = Settings(tmp_path / "config.json")
+    lines = map_summary(cfg, maps_dir)
+    assert lines
+    assert not any(line.startswith("Активная карта:") for line in lines)
+    assert any("status=not_downloaded" in line for line in lines)
+
+
+def test_map_summary_missing_file(tmp_path: Path):
+    maps_dir = tmp_path / "maps"
+    maps_dir.mkdir()
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("gone", "Нет файла", str(maps_dir / "gone.mbtiles"))
+
+    lines = map_summary(cfg, maps_dir)
+    assert any("gone (Нет файла)" in line for line in lines)
+    assert any("status=missing" in line for line in lines)
 
 
 def test_delete_map_file_with_sidecars(tmp_path: Path):

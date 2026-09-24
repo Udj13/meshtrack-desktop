@@ -50,6 +50,18 @@ class TrackShownSpy(QObject):
         self.values.append((tracker_id, shown))
 
 
+class ViewSpy(QObject):
+    received = Signal(float, float, int)
+
+    def __init__(self):
+        super().__init__()
+        self.values = []
+        self.received.connect(self._on_received)
+
+    def _on_received(self, lat, lon, zoom):
+        self.values.append((lat, lon, zoom))
+
+
 def test_push_position_emits_signal():
     bridge = WebBridge()
     spy = SignalSpy()
@@ -76,6 +88,16 @@ def test_set_track_shown_emits_signal():
     bridge.setTrackShown("1", False)
 
     assert spy.values == [("1", True), ("1", False)]
+
+
+def test_report_view_emits_signal():
+    bridge = WebBridge()
+    spy = ViewSpy()
+    bridge.viewChanged.connect(spy.received)
+
+    bridge.reportView(54.4, 45.5, 13)
+
+    assert spy.values == [(54.4, 45.5, 13)]
 
 
 class FakeRepo:

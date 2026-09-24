@@ -65,12 +65,12 @@ STATUS_LABELS = {
 
 # Статус -> [(текст кнопки, handler)]
 ACTIONS: dict[str, list[tuple[str, str]]] = {
-    DOWNLOADED: [("Сделать активной", "activate"), ("Удалить", "delete")],
-    PARTIAL: [("Сделать активной", "activate"), ("Докачать", "resume"), ("Удалить", "delete")],
+    DOWNLOADED: [("Сделать активной", "activate"), ("Проверить", "verify"), ("Удалить", "delete")],
+    PARTIAL: [("Сделать активной", "activate"), ("Проверить", "verify"), ("Докачать", "resume"), ("Удалить", "delete")],
     MISSING: [("Скачать заново", "download"), ("Убрать из списка", "unlist")],
     ORPHAN: [("Подключить", "connect"), ("Удалить", "delete")],
     NOT_DOWNLOADED: [("Скачать", "download")],
-    CORRUPTED: [("Удалить", "delete")],
+    CORRUPTED: [("Проверить", "verify"), ("Удалить", "delete")],
 }
 
 
@@ -183,6 +183,8 @@ class MapManagerDialog(QDialog):
         entry = self._entries[row]
         if action == "activate":
             self._activate(entry)
+        elif action == "verify":
+            self._verify(entry)
         elif action == "delete":
             self._delete(entry)
         elif action == "resume":
@@ -199,6 +201,50 @@ class MapManagerDialog(QDialog):
         self._save_settings()
         self._push_active_map(entry.map_id)
         self._refresh()
+
+    def _verify(self, entry: MapEntry):
+        """Проверяет целостность MBTiles и показывает отчёт (диагностика)."""
+        from .mapstore import MapStore
+
+        try:
+            store = MapStore(entry.path)
+            report = store.verify()
+            try:
+                zmin, zmax = store.get_minmax_zoom()
+                zoom_txt = f"{zmin}-{zmax}"
+            except Exception:
+                zoom_txt = "—"
+        except Exception:
+            logger.exception("Проверка карты %s упала", entry.map_id)
+            QMessageBox.critical(
+                self, _("Проверка карты"), _("Не удалось прочитать файл карты.")
+            )
+            return
+
+        lines = [
+            entry.path,
+            _("Зум: {z}").format(z=zoom_txt),
+            _("Тайлов: {n}").format(n=report["tile_count"]),
+        ]
+        if report["ok"]:
+            lines.append(_("Карта в порядке"))
+        else:
+            lines.append(_("Проблемы:"))
+            lines.extend(f"— {e}" for e in report["errors"])
+            lines.append(_("Перекачайте карту или выберите другую"))
+        msg = "\n".join(lines)
+        title = _("Проверка карты")
+        if report["ok"]:
+            QMessageBox.information(self, title, msg)
+        else:
+            QMessageBox.warning(self, title, msg)
+        logger.info(
+            "Проверка карты %s: ok=%s, tiles=%s, errors=%s",
+            entry.map_id,
+            report["ok"],
+            report["tile_count"],
+            report["errors"],
+        )
 
     def _delete(self, entry: MapEntry):
         size = _format_size(entry.size_bytes) if entry.size_bytes else ""

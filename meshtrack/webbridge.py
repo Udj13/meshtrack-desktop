@@ -22,6 +22,7 @@ class WebBridge(QObject):
     historyCleared = Signal()
     activeMapChanged = Signal(str)
     trackShown = Signal(str, bool)
+    viewChanged = Signal(float, float, int)
 
     def __init__(self, repo=None, settings=None, parent=None):
         super().__init__(parent)
@@ -91,6 +92,15 @@ class WebBridge(QObject):
         if self._settings is not None:
             self._settings.active_map_id = map_id
         self.activeMapChanged.emit(map_id)
+
+    @Slot(float, float, int)
+    def reportView(self, lat: float, lon: float, zoom: int):
+        """Leaflet сообщает центр и зум карты после moveend/load.
+
+        MainWindow сверяет их с bbox/z-диапазоном активной карты и при
+        несовпадении показывает подсказку в статус-баре.
+        """
+        self.viewChanged.emit(lat, lon, int(zoom))
 
     @Slot(result=int)
     def getMinZoom(self) -> int:

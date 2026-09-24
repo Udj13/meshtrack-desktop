@@ -239,6 +239,54 @@ def _entry_from_config_or_disk(
     )
 
 
+def point_in_bbox(lat: float, lon: float, bbox) -> bool:
+    """True, если точка (lat, lon) попадает в bbox (south, north, west, east).
+
+    Границы включительны. bbox должен быть (south, north, west, east) с
+    south <= north и west <= east; антимеридиан не обрабатывается (регионы
+    MeshTrack далеко от ±180).
+    """
+    south, north, west, east = bbox
+    return south <= lat <= north and west <= lon <= east
+
+
+def map_summary(settings: Settings, maps_dir: str | Path) -> list[str]:
+    """Однострочная сводка всех карт для лога на старте.
+
+    Возвращает строки вида «id (name): status, file=<path>, tiles=N, z=N-N,
+    bbox=(...)» для каждой карты + строку про активную карту. Не-существующие
+    файлы помечаются как missing; встроенные регионы без файла — not_downloaded.
+    Строк про активную карту нет, если активная не выбрана.
+    """
+    entries = scan_maps(settings, maps_dir)
+    if not entries:
+        return []
+
+    lines: list[str] = []
+    active_entry = None
+    for entry in entries:
+        if entry.map_id == settings.active_map_id:
+            active_entry = entry
+        parts = [f"{entry.map_id} ({entry.name})", f"status={entry.status}"]
+        parts.append(f"file={entry.path}")
+        if entry.exists:
+            parts.append(f"tiles={entry.tile_count}")
+            if entry.zmin is not None and entry.zmax is not None:
+                parts.append(f"z={entry.zmin}-{entry.zmax}")
+            bbox = map_bbox(entry)
+            if bbox is not None:
+                parts.append(f"bbox=({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]})")
+        lines.append(", ".join(parts))
+
+    if active_entry is not None:
+        bbox = map_bbox(active_entry)
+        active = f"Активная карта: {active_entry.map_id}"
+        if bbox is not None:
+            active += f", bbox=({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]})"
+        lines.insert(0, active)
+    return lines
+
+
 def map_bbox(entry: MapEntry) -> tuple[float, float, float, float] | None:
     """bbox карты: из метаданных файла или из доп. полей (конфиг/регион)."""
     if entry.bbox is not None:

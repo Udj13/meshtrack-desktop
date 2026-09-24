@@ -65,6 +65,16 @@ function colorForVario(vario) {
 const map = L.map("map", { attributionControl: false }).setView([54.4, 45.4], 13);
 L.control.attribution({ prefix: false }).addTo(map);
 
+// Сообщаем Python центр/зум карты: там сверяют с bbox активной карты и,
+// при несовпадении, показывают подсказку «область вне карты».
+function reportMapView() {
+    if (!window.qt || !bridge || !bridge.reportView) return;
+    const c = map.getCenter();
+    bridge.reportView(c.lat, c.lng, map.getZoom());
+}
+map.on("load", reportMapView);
+map.on("moveend", reportMapView);
+
 let offlineLayer = null;
 let currentMapMinZoom = 2;
 let currentMapMaxZoom = 18;
@@ -116,6 +126,7 @@ function loadMapWithZoom(mapId) {
             minZoom = parseInt(minZoom) || 2;
             maxZoom = parseInt(maxZoom) || 18;
             setOfflineMapLayer(mapId, minZoom, maxZoom);
+            reportMapView();
         });
     });
 }
@@ -410,7 +421,9 @@ function onPosition(pos) {
     }
 }
 
-let bridge = null;
+// var (не let/const): reportMapView может вызваться событием Leaflet 'load'
+// раньше этого места — hoisting даёт undefined вместо TDZ-ReferenceError.
+var bridge = null;
 
 if (typeof qt !== "undefined") {
     new QWebChannel(qt.webChannelTransport, function(channel) {

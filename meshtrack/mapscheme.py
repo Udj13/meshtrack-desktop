@@ -60,6 +60,8 @@ class MapSchemeHandler(QWebEngineUrlSchemeHandler):
         super().__init__(parent)
         self._settings = settings
         self._active_devices: set[QBuffer] = set()
+        # Карты, по которым уже предупредили о промахах тайлов (INFO один раз).
+        self._miss_warned: set[str] = set()
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
         url = job.requestUrl().toString()
@@ -91,6 +93,14 @@ class MapSchemeHandler(QWebEngineUrlSchemeHandler):
 
         if data is None:
             logger.debug("Tile miss: %s z=%d x=%d y=%d", map_id, z, x, y)
+            if map_id not in self._miss_warned:
+                self._miss_warned.add(map_id)
+                logger.info(
+                    "Тайлы не найдены в области: map://%s/%d/%d/%d.png — "
+                    "область просмотра вне bbox/зума загруженной карты "
+                    "«%s» (файл %s); перекачайте карту под нужный регион",
+                    map_id, z, x, y, map_id, path,
+                )
             self._reply(job, TRANSPARENT_PNG, b"image/png")
         elif not is_valid_tile_blob(data):
             # В старой/битой карте может лежать html вместо PNG — в рендер
