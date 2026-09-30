@@ -4,6 +4,7 @@
     python tools/download_region.py --region lyambir_airfield --out ~/maps/lyambir.mbtiles
     python tools/download_region.py --bbox 54.0,54.1,45.0,45.1 --zmin 10 --zmax 12 --out test.mbtiles
 """
+
 from __future__ import annotations
 
 import argparse
@@ -14,11 +15,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from meshtrack.downloader import _format_size, _format_time, download, estimate_tile_count
+from meshtrack.downloader import (
+    _format_size,
+    _format_time,
+    download,
+    estimate_tile_count,
+)
 from meshtrack.mapstore import MapStore
 from meshtrack.regions import get_prebuilt
 
 OPENTOPOMAP_TEMPLATE = "https://tile.opentopomap.org/{z}/{x}/{y}.png"
+OPENTOPOMAP_BACKUP_TEMPLATE = "https://backup.opentopomap.org/{z}/{x}/{y}.png"
 
 
 def parse_bbox(s: str) -> tuple[float, float, float, float]:
@@ -86,14 +93,17 @@ def main():
         zmax=args.zmax,
         workers=args.workers,
         on_progress=on_progress,
+        backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
     )
     if result.get("failed", 0) == 0:
         store.set_metadata("complete", "1")
     print()
     size = _format_size(result.get("bytes_downloaded", 0))
     elapsed = result.get("elapsed_seconds", 0)
+    backup_n = result.get("downloaded_backup", 0)
+    source_txt = f" ({backup_n} с резервного)" if backup_n else ""
     print(
-        f"Готово: скачано {result['downloaded']} ({size}), "
+        f"Готово: скачано {result['downloaded']}{source_txt} ({size}), "
         f"пропущено {result['skipped']}, ошибок {result['failed']}, "
         f"за {_format_time(elapsed)}"
     )

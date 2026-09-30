@@ -10,3 +10,4 @@ site/
 .DS_Store
 *.mbtiles
 .ruff_cache/
+logs/

@@ -8,6 +8,7 @@
 - не скачана (встроенный регион) — скачать;
 - повреждена — удалить.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,6 +33,7 @@ from .downloader import _format_size
 from .first_run_wizard import (
     DownloadThread,
     FirstRunWizard,
+    OPENTOPOMAP_BACKUP_TEMPLATE,
     OPENTOPOMAP_TEMPLATE,
 )
 from .i18n import tr as _
@@ -52,7 +54,16 @@ from .settings import Settings
 
 logger = logging.getLogger(__name__)
 
-COLUMNS = ["Название", "Область", "Зум", "Размер", "Тайлов", "Статус", "Активна", "Действия"]
+COLUMNS = [
+    "Название",
+    "Область",
+    "Зум",
+    "Размер",
+    "Тайлов",
+    "Статус",
+    "Активна",
+    "Действия",
+]
 
 STATUS_LABELS = {
     DOWNLOADED: "Скачана",
@@ -65,8 +76,17 @@ STATUS_LABELS = {
 
 # Статус -> [(текст кнопки, handler)]
 ACTIONS: dict[str, list[tuple[str, str]]] = {
-    DOWNLOADED: [("Сделать активной", "activate"), ("Проверить", "verify"), ("Удалить", "delete")],
-    PARTIAL: [("Сделать активной", "activate"), ("Проверить", "verify"), ("Докачать", "resume"), ("Удалить", "delete")],
+    DOWNLOADED: [
+        ("Сделать активной", "activate"),
+        ("Проверить", "verify"),
+        ("Удалить", "delete"),
+    ],
+    PARTIAL: [
+        ("Сделать активной", "activate"),
+        ("Проверить", "verify"),
+        ("Докачать", "resume"),
+        ("Удалить", "delete"),
+    ],
     MISSING: [("Скачать заново", "download"), ("Убрать из списка", "unlist")],
     ORPHAN: [("Подключить", "connect"), ("Удалить", "delete")],
     NOT_DOWNLOADED: [("Скачать", "download")],
@@ -129,7 +149,9 @@ class MapManagerDialog(QDialog):
             self._set_item(row, 0, entry.name)
             self._set_item(row, 1, self._format_bbox(entry))
             self._set_item(row, 2, self._format_zoom(entry))
-            self._set_item(row, 3, _format_size(entry.size_bytes) if entry.size_bytes else "—")
+            self._set_item(
+                row, 3, _format_size(entry.size_bytes) if entry.size_bytes else "—"
+            )
             self._set_item(row, 4, self._format_tiles(entry))
             self._set_item(row, 5, _(STATUS_LABELS.get(entry.status, entry.status)))
             self._set_item(row, 6, "✓" if entry.map_id == active_id else "")
@@ -322,7 +344,15 @@ class MapManagerDialog(QDialog):
         from .mapstore import MapStore
 
         store = MapStore(entry.path)
-        thread = DownloadThread(store, bbox, zmin, zmax, OPENTOPOMAP_TEMPLATE, parent=self)
+        thread = DownloadThread(
+            store,
+            bbox,
+            zmin,
+            zmax,
+            OPENTOPOMAP_TEMPLATE,
+            backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
+            parent=self,
+        )
         self._thread = thread
 
         progress = QProgressDialog(
@@ -344,6 +374,16 @@ class MapManagerDialog(QDialog):
             progress.close()
             if result.get("failed", 0) == 0:
                 store.set_metadata("complete", "1")
+            logger.info(
+                "Докачка %s: скачано %d (primary=%d, backup=%d), "
+                "пропущено %d, ошибок %d",
+                entry.map_id,
+                result.get("downloaded", 0),
+                result.get("downloaded_primary", 0),
+                result.get("downloaded_backup", 0),
+                result.get("skipped", 0),
+                result.get("failed", 0),
+            )
             self._settings.add_map(
                 entry.map_id,
                 entry.name,

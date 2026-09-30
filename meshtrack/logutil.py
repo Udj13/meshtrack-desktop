@@ -1,13 +1,21 @@
 """Настройка логирования MeshTrack.
 
-- Пишет в файл meshtrack.log в папке данных приложения.
+- Пишет в файл meshtrack.log в папке данных приложения с ротацией по размеру
+  (2 МБ × 5 файлов, всего ~12 МБ) — лог не растёт бесконечно.
 - Предоставляет QtLogHandler для вывода последних строк в виджет окна.
 """
+
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
+
+# Ротация: файл растёт максимум до maxBytes, далее старые копии сдвигаются
+# (meshtrack.log.1 ... meshtrack.log.N-1), старые удаляются.
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
 
 
 class QtLogHandler(QObject, logging.Handler):
@@ -58,7 +66,12 @@ def setup_logging(log_path: Path, level: int = logging.INFO) -> logging.Logger:
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"
     )
 
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 

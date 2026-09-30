@@ -77,16 +77,20 @@ class TileDownloader:
         store: MapStore,
         url_template: str,
         rate_limit: float = RATE_LIMIT_SECONDS,
+        backup_url_template: str | None = None,
+        max_attempts: int = 4,
     ):
         self.store = store
         self.url_template = url_template
+        self.backup_url_template = backup_url_template
         self.rate_limit = rate_limit
+        self.max_attempts = max_attempts
         self._last_fetch: dict[str, float] = {}
         self._last_lock = threading.Lock()
         self._session = requests.Session()
-
-    def _url(self, z: int, x: int, y: int) -> str:
-        return self.url_template.format(z=z, x=x, y=y)
+        # Одноразовое INFO при переключении на резервный источник.
+        self._switch_notified = False
+        self._switch_lock = threading.Lock()
 
     def _wait_for_rate_limit(self, host: str) -> None:
         with self._last_lock:
@@ -100,63 +104,106 @@ class TileDownloader:
 
     def _download_one(
         self, z: int, x: int, y: int, cancel_event: threading.Event | None = None
-    ) -> tuple[int, int, int, bytes | None]:
-        """Скачивает один тайл. Возвращает (z, x, y, data) или None при ошибке."""
+    ) -> tuple[int, int, int, bytes | None, str | None]:
+        """Скачивает один тайл. Возвращает (z, x, y, data, source); source —
+        'primary'/'backup' для успешно скачанного тайла, иначе None.
+
+        Источники (url_template, затем backup_url_template) перебираются по
+        кругу, пока не исчерпано `max_attempts` запросов на тайл суммарно.
+        Например, при двух источниках и 4 попытках: основной → резервный →
+        основной → резервный. Фолбэк на резервный срабатывает уже после
+        первой неудачи основного, а не после порога ретраев на нём.
+        """
         if cancel_event is not None and cancel_event.is_set():
-            return z, x, y, None
+            return z, x, y, None, None
 
         # Resume: если тайл уже есть, пропускаем.
         if self.store.has(z, x, y):
-            return z, x, y, b""  # пустые bytes = "уже есть"
+            return z, x, y, b"", None  # пустые bytes = "уже есть"
 
-        url = self._url(z, x, y)
-        host = url.split("/", 3)[2] if "//" in url else url
-
-        self._wait_for_rate_limit(host)
+        templates = [self.url_template]
+        if self.backup_url_template:
+            templates.append(self.backup_url_template)
 
         attempts = 0
-        max_attempts = 4
         backoff = 1.0
-        while attempts < max_attempts:
+        while attempts < self.max_attempts:
             if cancel_event is not None and cancel_event.is_set():
-                return z, x, y, None
+                return z, x, y, None, None
+
+            template = templates[attempts % len(templates)]
+            url = template.format(z=z, x=x, y=y)
+            host = url.split("/", 3)[2] if "//" in url else url
+
+            self._wait_for_rate_limit(host)
+
             try:
                 resp = self._session.get(url, timeout=30)
-                if resp.status_code == 200:
-                    if not is_valid_tile_blob(resp.content):
-                        # HTTP 200, но тело — не PNG (html-страница ошибки/
-                        # rate-limit от прокси). Такое в хранилище писать нельзя.
-                        logger.warning(
-                            "HTTP 200, но ответ не PNG (%d байт) для %s, попытка %d",
-                            len(resp.content),
-                            url,
-                            attempts + 1,
-                        )
-                        time.sleep(backoff)
-                        backoff *= 2
-                        attempts += 1
-                        continue
-                    return z, x, y, resp.content
-                if resp.status_code == 429 or resp.status_code >= 500:
+            except requests.RequestException as exc:
+                logger.warning("Ошибка загрузки %s: %s", url, exc)
+                attempts += 1
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+
+            if resp.status_code == 200:
+                if not is_valid_tile_blob(resp.content):
+                    # HTTP 200, но тело — не PNG (html-страница ошибки/
+                    # rate-limit от прокси). Такое в хранилище писать нельзя.
                     logger.warning(
-                        "HTTP %d для %s, попытка %d",
-                        resp.status_code,
+                        "HTTP 200, но ответ не PNG (%d байт) для %s, попытка %d",
+                        len(resp.content),
                         url,
                         attempts + 1,
                     )
+                    attempts += 1
                     time.sleep(backoff)
                     backoff *= 2
-                    attempts += 1
                     continue
-                logger.warning("HTTP %d для %s", resp.status_code, url)
-                return z, x, y, None
-            except requests.RequestException as exc:
-                logger.warning("Ошибка загрузки %s: %s", url, exc)
+                source = "primary" if template is self.url_template else "backup"
+                if source == "backup":
+                    self._notify_switch_to_backup()
+                return z, x, y, resp.content, source
+            if resp.status_code == 429 or resp.status_code >= 500:
+                logger.warning(
+                    "HTTP %d для %s, попытка %d",
+                    resp.status_code,
+                    url,
+                    attempts + 1,
+                )
+                attempts += 1
                 time.sleep(backoff)
                 backoff *= 2
-                attempts += 1
-        logger.error("Не удалось загрузить %s после %d попыток", url, max_attempts)
-        return z, x, y, None
+                continue
+            # Прочие 4xx повторять бессмысленно — пробуем следующий источник.
+            logger.warning("HTTP %d для %s", resp.status_code, url)
+            attempts += 1
+
+        logger.error(
+            "Не удалось загрузить %d/%d/%d ни из одного источника: %s",
+            z,
+            x,
+            y,
+            ", ".join(t.format(z=z, x=x, y=y) for t in templates),
+        )
+        return z, x, y, None, None
+
+    def _notify_switch_to_backup(self) -> None:
+        """Логирует переключение на резервный источник один раз на закачку."""
+        with self._switch_lock:
+            if self._switch_notified:
+                return
+            self._switch_notified = True
+        host = (
+            self.backup_url_template.split("/", 3)[2]
+            if self.backup_url_template and "//" in self.backup_url_template
+            else self.backup_url_template
+        )
+        logger.info(
+            "Основной тайл-сервер отвечает ошибками/таймаутами — "
+            "тайлы берутся с резервного: %s",
+            host,
+        )
 
 
 def _format_size(bytes_count: int) -> str:
@@ -188,6 +235,9 @@ def download(
     workers: int = DEFAULT_WORKERS,
     on_progress: Callable[[int, int, dict], None] | None = None,
     cancel_event: threading.Event | None = None,
+    *,
+    backup_url_template: str | None = None,
+    max_attempts: int = 4,
 ) -> dict:
     """Скачивает область bbox в MapStore.
 
@@ -202,6 +252,13 @@ def download(
             bytes_downloaded, bytes_estimated, tiles_per_second,
             bytes_per_second, seconds_remaining.
         cancel_event: threading.Event для отмены.
+        backup_url_template: резервный шаблон URL; если тайл не удалось скачать
+            с основного источника, он пробуется с резервного (например,
+            «https://backup.opentopomap.org/{z}/{x}/{y}.png», официальный
+            бэкап-сервер OpenTopoMap).
+        max_attempts: сколько запросов суммарно тратится на один тайл по всем
+            источникам (по умолчанию 4; при двух источниках это два полных
+            круга основной → резервный).
 
     Возвращает dict:
         total: общее число тайлов
@@ -221,9 +278,16 @@ def download(
                 tiles.append((z, x, y))
 
     total = len(tiles)
-    downloader = TileDownloader(store, url_template)
+    downloader = TileDownloader(
+        store,
+        url_template,
+        backup_url_template=backup_url_template,
+        max_attempts=max_attempts,
+    )
 
     downloaded = 0
+    downloaded_primary = 0
+    downloaded_backup = 0
     skipped = 0
     failed = 0
     bytes_downloaded = 0
@@ -278,7 +342,7 @@ def download(
         for future in as_completed(future_to_tile):
             z, x, y = future_to_tile[future]
             try:
-                _, _, _, data = future.result()
+                _, _, _, data, source = future.result()
             except Exception as exc:
                 logger.exception("Ошибка задачи загрузки %d/%d/%d: %s", z, x, y, exc)
                 failed += 1
@@ -296,6 +360,10 @@ def download(
                 with batch_lock:
                     batch.append((z, x, y, data))
                 downloaded += 1
+                if source == "backup":
+                    downloaded_backup += 1
+                else:
+                    downloaded_primary += 1
                 bytes_downloaded += len(data)
                 if len(batch) >= 50:
                     flush_batch()
@@ -309,6 +377,8 @@ def download(
     return {
         "total": total,
         "downloaded": downloaded,
+        "downloaded_primary": downloaded_primary,
+        "downloaded_backup": downloaded_backup,
         "skipped": skipped,
         "failed": failed,
         "bytes_downloaded": bytes_downloaded,

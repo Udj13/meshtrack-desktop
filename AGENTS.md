@@ -99,7 +99,8 @@ LoRa-приёмник (USB-UART)
 - Приёмник реального устройства: `/dev/cu.usbserial-0001`, 115200 baud,
   CP2102. Открытие порта сбрасывает ESP32 — для чтения держи DTR/RTS = False.
 - Данные приложения: `~/Library/Application Support/MeshTrack/`
-  (`config.json`, `meshtrack.db`, `maps/*.mbtiles`, `meshtrack.log`).
+  (`config.json`, `meshtrack.db`, `maps/*.mbtiles`, `meshtrack.log` — с ротацией
+  2 МБ × 5; при сборе лога проси пользователя `meshtrack.log*`).
 
 ## Конвенции
 

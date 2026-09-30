@@ -189,6 +189,7 @@
     "Загружено {done} из {total} тайлов\n{size} / ~{estimated} осталось ~{time_str}": "Downloaded {done} of {total} tiles\n{size} / ~{estimated} left ~{time_str}",
     "подсчёт…": "calculating…",
     "Готово: скачано {n} тайлов ({size})\nпропущено {skipped}, ошибок {failed}, за {time_str}": "Done: downloaded {n} tiles ({size})\nskipped {skipped}, errors {failed}, in {time_str}",
+    "из них с резервного сервера: {n}": "of which from the backup server: {n}",
     "Ошибка: {msg}": "Error: {msg}",
     "Ошибка загрузки": "Download error",
     "Загрузка отменена. Скачанные тайлы сохранены.": "Download cancelled. Downloaded tiles are kept.",

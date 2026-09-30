@@ -6,6 +6,7 @@ QWizard с четырьмя страницами:
 3. Прогресс скачивания.
 4. Завершение.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,13 +44,16 @@ logger = logging.getLogger(__name__)
 
 # URL-шаблон OpenTopoMap (PROJECT.md §8).
 OPENTOPOMAP_TEMPLATE = "https://tile.opentopomap.org/{z}/{x}/{y}.png"
+# Официальный резервный сервер OpenTopoMap (roadmap на opentopomap.org):
+# основной иногда отвечает анти-бот HTML/таймаутами — тайл пробуется и с него.
+OPENTOPOMAP_BACKUP_TEMPLATE = "https://backup.opentopomap.org/{z}/{x}/{y}.png"
 
 
 class DownloadThread(QThread):
     """Поток скачивания тайлов; испускает сигналы прогресса и результата."""
 
     progress = Signal(int, int, dict)  # (done, total, stats)
-    finished_ok = Signal(dict)         # {"total": int, "downloaded": int, ...}
+    finished_ok = Signal(dict)  # {"total": int, "downloaded": int, ...}
     error = Signal(str)
 
     def __init__(
@@ -59,6 +63,7 @@ class DownloadThread(QThread):
         zmin: int,
         zmax: int,
         url_template: str,
+        backup_url_template: str | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -67,6 +72,7 @@ class DownloadThread(QThread):
         self.zmin = zmin
         self.zmax = zmax
         self.url_template = url_template
+        self.backup_url_template = backup_url_template
         self.cancel_event = threading.Event()
 
     def run(self):
@@ -81,6 +87,7 @@ class DownloadThread(QThread):
                     done, total, stats
                 ),
                 cancel_event=self.cancel_event,
+                backup_url_template=self.backup_url_template,
             )
             self.finished_ok.emit(result)
         except Exception as exc:
@@ -222,7 +229,9 @@ class RegionPage(QWizardPage):
             west = float(self._west.text().replace(",", "."))
             east = float(self._east.text().replace(",", "."))
         except ValueError:
-            QMessageBox.warning(self, _("Ошибка"), _("Введите числовые координаты bbox"))
+            QMessageBox.warning(
+                self, _("Ошибка"), _("Введите числовые координаты bbox")
+            )
             return False
         ok, msg = regions.validate_bbox(south, north, west, east)
         if not ok:
@@ -313,7 +322,13 @@ class DownloadPage(QWizardPage):
         )
 
         self._thread = DownloadThread(
-            store, bbox, zmin, zmax, OPENTOPOMAP_TEMPLATE, parent=self
+            store,
+            bbox,
+            zmin,
+            zmax,
+            OPENTOPOMAP_TEMPLATE,
+            backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
+            parent=self,
         )
         self._thread.progress.connect(self._on_progress)
         self._thread.finished_ok.connect(self._on_finished)
@@ -354,6 +369,21 @@ class DownloadPage(QWizardPage):
             self._store.set_metadata("complete", "1")
         size = downloader._format_size(result.get("bytes_downloaded", 0))
         elapsed = result.get("elapsed_seconds", 0)
+        backup_n = result.get("downloaded_backup", 0)
+        logger.info(
+            "Закачка карты: скачано %d (primary=%d, backup=%d), "
+            "пропущено %d, ошибок %d",
+            result.get("downloaded", 0),
+            result.get("downloaded_primary", 0),
+            backup_n,
+            result.get("skipped", 0),
+            result.get("failed", 0),
+        )
+        source_line = ""
+        if backup_n:
+            source_line = "\n" + _("из них с резервного сервера: {n}").format(
+                n=backup_n
+            )
         self._status.setText(
             _(
                 "Готово: скачано {n} тайлов ({size})\n"
@@ -365,6 +395,7 @@ class DownloadPage(QWizardPage):
                 failed=result["failed"],
                 time_str=downloader._format_time(elapsed),
             )
+            + source_line
         )
         self.completeChanged.emit()
 
@@ -425,7 +456,9 @@ class FirstRunWizard(QWizard):
     ):
         super().__init__(parent)
         self.setWindowTitle(
-            _("MeshTrack — первый запуск") if show_welcome else _("MeshTrack — загрузка карты")
+            _("MeshTrack — первый запуск")
+            if show_welcome
+            else _("MeshTrack — загрузка карты")
         )
         self.resize(640, 480)
 
@@ -486,7 +519,9 @@ class FirstRunWizard(QWizard):
     def retranslate(self) -> None:
         show_welcome = self._welcome_page is not None
         self.setWindowTitle(
-            _("MeshTrack — первый запуск") if show_welcome else _("MeshTrack — загрузка карты")
+            _("MeshTrack — первый запуск")
+            if show_welcome
+            else _("MeshTrack — загрузка карты")
         )
         self.setButtonText(QWizard.FinishButton, _("Готово"))
         self.setButtonText(QWizard.CancelButton, _("Отмена"))

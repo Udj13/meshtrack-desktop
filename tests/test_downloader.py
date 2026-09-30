@@ -249,9 +249,10 @@ def test_download_cancel(store: MapStore, http_server: str):
 
 def test_tile_downloader_rate_limit(store: MapStore, http_server: str):
     dl = TileDownloader(store, http_server, rate_limit=0.05)
-    z, x, y, data = dl._download_one(10, 512, 256)
+    z, x, y, data, source = dl._download_one(10, 512, 256)
     assert data == FAKE_PNG
     assert data is not None
+    assert source == "primary"
     store.insert(z, x, y, data)
     assert store.get(z, x, y) == FAKE_PNG
 
@@ -280,6 +281,69 @@ def test_download_rejects_html_200(store: MapStore, html_server: str):
     """HTTP 200 с html-телом (ошибка/rate-limit) не должен попадать в MBTiles."""
     bbox = (54.0, 54.01, 45.0, 45.01)
     result = download(store, bbox, html_server, zmin=10, zmax=10, workers=1)
+    assert result["downloaded"] == 0
+    assert result["failed"] > 0
+    assert store.count() == 0
+
+
+def test_download_failover_to_backup(
+    store: MapStore, html_server: str, http_server: str
+):
+    """Основной источник отвечает HTML — тайл докачивается с резервного."""
+    bbox = (54.0, 54.01, 45.0, 45.01)
+    result = download(
+        store,
+        bbox,
+        html_server,
+        backup_url_template=http_server,
+        zmin=10,
+        zmax=10,
+        workers=1,
+        max_attempts=2,
+    )
+    assert result["failed"] == 0
+    assert result["downloaded"] > 0
+    assert result["downloaded_primary"] == 0
+    assert result["downloaded_backup"] == result["downloaded"]
+    assert store.count() == result["downloaded"]
+    tiles = store.list_tiles(10)
+    assert tiles
+    z, x, y = tiles[0]
+    assert store.get(z, x, y) == FAKE_PNG
+
+
+def test_download_failover_no_backup_still_rejects_html(
+    store: MapStore, html_server: str
+):
+    """Без резервного источника HTML-ответы по-прежнему не попадают в карту."""
+    bbox = (54.0, 54.01, 45.0, 45.01)
+    result = download(
+        store,
+        bbox,
+        html_server,
+        zmin=10,
+        zmax=10,
+        workers=1,
+        max_attempts=1,
+    )
+    assert result["downloaded"] == 0
+    assert result["failed"] > 0
+    assert store.count() == 0
+
+
+def test_download_failover_backup_down_marks_failed(store: MapStore, html_server: str):
+    """Оба источника отдают HTML — тайл считается упавшим."""
+    bbox = (54.0, 54.01, 45.0, 45.01)
+    result = download(
+        store,
+        bbox,
+        html_server,
+        backup_url_template=html_server,
+        zmin=10,
+        zmax=10,
+        workers=1,
+        max_attempts=1,
+    )
     assert result["downloaded"] == 0
     assert result["failed"] > 0
     assert store.count() == 0
