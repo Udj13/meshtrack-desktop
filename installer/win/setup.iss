@@ -1,9 +1,9 @@
 ; MeshTrack Inno Setup script (Windows).
-; Собирает installer/win/output/MeshTrackSetup-0.4.0.exe из dist/MeshTrack.
+; Собирает installer/win/output/MeshTrackSetup-0.4.2.exe из dist/MeshTrack.
 ; Требования: сначала `pyinstaller installer\win\MeshTrack.spec`, затем Inno Setup 6.
 
 #define MyAppName "MeshTrack"
-#define MyAppVersion "0.4.0"
+#define MyAppVersion "0.4.2"
 #define MyAppPublisher "MeshTrack"
 #define MyAppExeName "MeshTrack.exe"
 #define MyAppDir "..\..\dist\MeshTrack"
