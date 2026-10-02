@@ -394,7 +394,12 @@ class DownloadPage(QWizardPage):
 
     def _on_finished(self, result: dict):
         self._result = result
-        if result.get("failed", 0) == 0 and self._store is not None:
+        if (
+            not self._cancelled
+            and result.get("failed", 0) == 0
+            and result.get("downloaded", 0) > 0
+            and self._store is not None
+        ):
             self._store.set_metadata("complete", "1")
         size = downloader._format_size(result.get("bytes_downloaded", 0))
         elapsed = result.get("elapsed_seconds", 0)

@@ -102,6 +102,10 @@ class MapManagerDialog(QDialog):
         self._maps_dir = Path(maps_dir)
         self._bridge = bridge
         self._thread: DownloadThread | None = None
+        self._thread_path: str | None = None
+        # Карты, которые пользователь удалил во время работы докачки: её
+        # финишный колбэк не должен заново добавлять их в конфиг.
+        self._deleted_ids: set[str] = set()
         self._entries: list[MapEntry] = []
 
         self.setWindowTitle(_("Управление картами"))
@@ -284,9 +288,34 @@ class MapManagerDialog(QDialog):
         )
         if reply != QMessageBox.Yes:
             return
+
+        # Если этот файл активно докачивается, его держит открытый WAL-мапстор
+        # и Windows не даст удалить — останавливаем поток до удаления.
+        if (
+            self._thread is not None
+            and self._thread.isRunning()
+            and self._thread_path == entry.path
+        ):
+            self._thread.cancel()
+            self._thread.wait(15000)
+            self._thread_path = None
+
+        # Докачка всё равно успеет прислать finished_ok — помечаем карту
+        # удалённой, чтобы колбэк не вернул её в конфиг.
+        self._deleted_ids.add(entry.map_id)
         new_active = delete_map(self._settings, entry.map_id)
         self._push_active_map(new_active or "")
         self._refresh()
+
+        if Path(entry.path).exists():
+            QMessageBox.warning(
+                self,
+                _("Удаление карты"),
+                _(
+                    "Файл карты «{name}» удалить не удалось (файл занят).\n"
+                    "Карта убрана из списка, файл остался на диске:\n{path}"
+                ).format(name=entry.name, path=entry.path),
+            )
 
     def _unlist(self, entry: MapEntry):
         was_active = self._settings.active_map_id == entry.map_id
@@ -355,6 +384,8 @@ class MapManagerDialog(QDialog):
             parent=self,
         )
         self._thread = thread
+        self._thread_path = entry.path
+        self._deleted_ids.discard(entry.map_id)
 
         progress = QProgressDialog(
             _("Докачка: {name}…").format(name=entry.name), _("Отмена"), 0, 100, self
@@ -373,7 +404,13 @@ class MapManagerDialog(QDialog):
 
         def on_finished(result: dict):
             progress.close()
-            if result.get("failed", 0) == 0:
+            self._thread_path = None
+            # Карту могли удалить во время докачки — не восстанавливаем её.
+            if entry.map_id in self._deleted_ids:
+                return
+            if thread.cancel_event.is_set():
+                return
+            if result.get("failed", 0) == 0 and result.get("downloaded", 0) > 0:
                 store.set_metadata("complete", "1")
             logger.info(
                 "Докачка %s: скачано %d (primary=%d, backup=%d), "
@@ -402,6 +439,9 @@ class MapManagerDialog(QDialog):
 
         def on_error(msg: str):
             progress.close()
+            self._thread_path = None
+            if entry.map_id in self._deleted_ids:
+                return
             QMessageBox.critical(self, _("Ошибка докачки"), msg)
             self._refresh()
 

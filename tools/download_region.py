@@ -102,7 +102,7 @@ def main():
         on_progress=on_progress,
         backup_url_template=source.backup_url_template,
     )
-    if result.get("failed", 0) == 0:
+    if result.get("failed", 0) == 0 and result.get("downloaded", 0) > 0:
         store.set_metadata("complete", "1")
     print()
     size = _format_size(result.get("bytes_downloaded", 0))

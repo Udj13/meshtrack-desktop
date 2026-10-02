@@ -161,6 +161,7 @@
     "Докачка карты": "Resume map",
     "Ошибка докачки": "Resume error",
     "Отмена": "Cancel",
+    "Файл карты «{name}» удалить не удалось (файл занят).\nКарта убрана из списка, файл остался на диске:\n{path}": "Failed to delete map file \"{name}\" (file is busy).\nMap removed from the list, the file remains on disk:\n{path}",
 
     "Добро пожаловать в MeshTrack": "Welcome to MeshTrack",
     "Для работы офлайн необходимо загрузить топографическую карту региона.": "To work offline you need to download a topographic map of the region.",

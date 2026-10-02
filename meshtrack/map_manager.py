@@ -331,23 +331,28 @@ def _release_wal_locks(path: Path) -> None:
         logger.exception("WAL-checkpoint не удался для %s", path)
 
 
-def delete_map_file(path: str | Path) -> None:
-    """Удаляет .mbtiles и sidecars (-wal, -shm) с ретраем для Windows."""
+def delete_map_file(path: str | Path) -> bool:
+    """Удаляет .mbtiles и sidecars (-wal, -shm) с ретраем для Windows.
+
+    Возвращает True, если .mbtiles удалось удалить. На Windows файл может
+    быть временно занят (активная докачка держит открытый WAL-мапстор,
+    антивирус и пр.) — ретраим дольше типичного времени лока.
+    """
     path = Path(path)
     _release_wal_locks(path)
-    targets = [path, Path(f"{path}-wal"), Path(f"{path}-shm")]
-    for target in targets:
-        for attempt in range(3):
+    for target in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+        for attempt in range(10):
             try:
                 target.unlink()
                 break
             except FileNotFoundError:
                 break
-            except OSError:
-                if attempt == 2:
-                    logger.warning("Не удалось удалить %s", target)
+            except OSError as exc:
+                if attempt == 9:
+                    logger.warning("Не удалось удалить %s: %s", target, exc)
                 else:
-                    time.sleep(0.1)
+                    time.sleep(0.2 + attempt * 0.15)
+    return not path.exists()
 
 
 def delete_map(settings: Settings, map_id: str) -> str | None:
