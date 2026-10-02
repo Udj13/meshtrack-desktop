@@ -5,6 +5,7 @@ MapSchemeHandler обрабатывает запросы вида:
     map://{map_id}/{z}/{x}/{y}.png
 При отсутствии тайла возвращает 1×1 прозрачный PNG.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,7 +19,7 @@ from PySide6.QtWebEngineCore import (
     QWebEngineUrlSchemeHandler,
 )
 
-from .mapstore import MapStore, is_valid_tile_blob
+from .mapstore import MapStore, is_valid_tile_blob, tile_content_type
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -26,15 +27,78 @@ logger = logging.getLogger(__name__)
 # 1×1 прозрачный PNG (RFC 2083 minimal).
 TRANSPARENT_PNG = bytes(
     [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
-        0x54, 0x08, 0xD7, 0x63, 0x60, 0x60, 0x60, 0x60,
-        0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05,
-        0xFE, 0xD4, 0x6A, 0xE6, 0x00, 0x00, 0x00, 0x00,
-        0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        0x89,
+        0x50,
+        0x4E,
+        0x47,
+        0x0D,
+        0x0A,
+        0x1A,
+        0x0A,
+        0x00,
+        0x00,
+        0x00,
+        0x0D,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x08,
+        0x06,
+        0x00,
+        0x00,
+        0x00,
+        0x1F,
+        0x15,
+        0xC4,
+        0x89,
+        0x00,
+        0x00,
+        0x00,
+        0x0D,
+        0x49,
+        0x44,
+        0x41,
+        0x54,
+        0x08,
+        0xD7,
+        0x63,
+        0x60,
+        0x60,
+        0x60,
+        0x60,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
+        0x00,
+        0x01,
+        0x00,
+        0x05,
+        0xFE,
+        0xD4,
+        0x6A,
+        0xE6,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x49,
+        0x45,
+        0x4E,
+        0x44,
+        0xAE,
+        0x42,
+        0x60,
+        0x82,
     ]
 )
 
@@ -99,20 +163,32 @@ class MapSchemeHandler(QWebEngineUrlSchemeHandler):
                     "Тайлы не найдены в области: map://%s/%d/%d/%d.png — "
                     "область просмотра вне bbox/зума загруженной карты "
                     "«%s» (файл %s); перекачайте карту под нужный регион",
-                    map_id, z, x, y, map_id, path,
+                    map_id,
+                    z,
+                    x,
+                    y,
+                    map_id,
+                    path,
                 )
             self._reply(job, TRANSPARENT_PNG, b"image/png")
         elif not is_valid_tile_blob(data):
-            # В старой/битой карте может лежать html вместо PNG — в рендер
+            # В старой/битой карте может лежать html вместо тайла — в рендер
             # не отдаём: декодер Chromium такое не переваривает → серые тайлы.
             logger.warning(
-                "Tile не PNG (повреждён): %s z=%d x=%d y=%d (%d байт) — перекачайте карту",
-                map_id, z, x, y, len(data),
+                "Tile не тайл (повреждён): %s z=%d x=%d y=%d (%d байт) — перекачайте карту",
+                map_id,
+                z,
+                x,
+                y,
+                len(data),
             )
             self._reply(job, TRANSPARENT_PNG, b"image/png")
         else:
-            logger.debug("Tile hit: %s z=%d x=%d y=%d (%d bytes)", map_id, z, x, y, len(data))
-            self._reply(job, data, b"image/png")
+            logger.debug(
+                "Tile hit: %s z=%d x=%d y=%d (%d bytes)", map_id, z, x, y, len(data)
+            )
+            # Content-Type по фактической сигнатуре (PNG или JPEG-тайлы Esri).
+            self._reply(job, data, tile_content_type(data))
 
     def _reply(
         self, job: QWebEngineUrlRequestJob, data: bytes, content_type: bytes
@@ -152,9 +228,7 @@ def register_map_scheme() -> None:
     _SCHEME_REGISTERED = True
 
 
-def install_map_handler(
-    profile, settings: Settings, parent=None
-) -> MapSchemeHandler:
+def install_map_handler(profile, settings: Settings, parent=None) -> MapSchemeHandler:
     """Устанавливает обработчик схемы map:// на profile."""
     handler = MapSchemeHandler(settings, parent=parent)
     profile.installUrlSchemeHandler(b"map", handler)

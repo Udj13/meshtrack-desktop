@@ -349,6 +349,129 @@ def test_download_failover_backup_down_marks_failed(store: MapStore, html_server
     assert store.count() == 0
 
 
+def test_download_circuit_breaker_skips_primary(store: MapStore, http_server: str):
+    """После порога неудач основной источник больше не запрашивается."""
+    primary_hits = []
+
+    class CountingHtmlHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            primary_hits.append(self.path)
+            body = b"<!DOCTYPE html><html><body>error</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), CountingHtmlHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    primary_url = f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        bbox = (54.0, 54.01, 45.0, 45.01)
+        result = download(
+            store,
+            bbox,
+            primary_url,
+            backup_url_template=http_server,
+            zmin=10,
+            zmax=11,
+            workers=1,
+            max_attempts=4,
+            primary_fail_threshold=2,
+        )
+        assert result["failed"] == 0
+        assert result["downloaded"] > 0
+        assert result["downloaded_primary"] == 0
+        assert result["downloaded_backup"] == result["downloaded"]
+        # Основной источник отдал HTML ровно до срабатывания предохранителя
+        # (порог = 2), дальше все тайлы брались сразу с резервного.
+        assert len(primary_hits) == 2
+    finally:
+        server.shutdown()
+
+
+def test_download_circuit_breaker_keeps_retrying_below_threshold(
+    store: MapStore, http_server: str
+):
+    """До порога основной источник не забывается даже после неудач."""
+    primary_hits = []
+    first_two = []
+
+    class FlakyHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            primary_hits.append(self.path)
+            if len(first_two) < 2:
+                first_two.append(self.path)
+                body = b"<!DOCTYPE html>"
+                ctype = "text/html"
+            else:
+                body = FAKE_PNG
+                ctype = "image/png"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), FlakyHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    primary_url = f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        bbox = (54.0, 54.01, 45.0, 45.01)
+        result = download(
+            store,
+            bbox,
+            primary_url,
+            zmin=10,
+            zmax=10,
+            workers=1,
+        )
+        assert result["failed"] == 0
+        assert result["downloaded"] > 0
+        assert len(primary_hits) > len(first_two)
+    finally:
+        server.shutdown()
+
+
+def test_tile_downloader_circuit_breaker_unit(store: MapStore):
+    """Вручную: после порога неудач _download_one не трогает основной."""
+    primary_calls = []
+
+    class StubResponse:
+        def __init__(self, content):
+            self.status_code = 200
+            self.content = content
+
+    primary_url = "http://broken.example/{z}/{x}/{y}.png"
+    backup_url = "http://ok.example/{z}/{x}/{y}.png"
+
+    dl = TileDownloader(store, primary_url, backup_url_template=backup_url)
+    dl.primary_fail_threshold = 2
+    dl._session.get = lambda url, timeout=30: (
+        primary_calls.append(url) or StubResponse(b"<!DOCTYPE html>")
+        if url.startswith("http://broken")
+        else StubResponse(FAKE_PNG)
+    )
+
+    for _ in range(3):
+        z, x, y, data, source = dl._download_one(10, 512, 256)
+        assert source == "backup"
+        assert data == FAKE_PNG
+
+    # Порог 2: основной запрашивался на первых двух неудачах, дальше нет.
+    assert len(primary_calls) == 2
+
+
 def test_download_retries_invalid_200_then_png(store: MapStore, retry_server: str):
     """Первый html-ответ пережидается, со второго — валидный PNG сохраняется."""
     bbox = (54.0, 54.01, 45.0, 45.01)
@@ -363,3 +486,67 @@ def test_download_retries_invalid_200_then_png(store: MapStore, retry_server: st
     assert data == FAKE_PNG
     assert data is not None
     assert data[:8] == PNG_MAGIC
+
+
+def test_download_sends_browser_user_agent(store: MapStore):
+    """Загрузчик шлёт браузерный User-Agent (анти-бот обходит)."""
+    seen = []
+
+    class UaRecordingHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("User-Agent", ""))
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(FAKE_PNG)))
+            self.end_headers()
+            self.wfile.write(FAKE_PNG)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), UaRecordingHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        bbox = (54.0, 54.01, 45.0, 45.01)
+        result = download(store, bbox, url, zmin=10, zmax=10, workers=1)
+        assert result["failed"] == 0
+        assert result["downloaded"] > 0
+        assert seen, "ни одного запроса не было"
+        assert all("python-requests" not in ua for ua in seen)
+        assert all("Mozilla" in ua for ua in seen)
+    finally:
+        server.shutdown()
+
+
+def test_download_404_fails_fast(store: MapStore):
+    """404 на источнике не ретраится 4-5 раз: один запрос на тайл."""
+    hits = []
+
+    class FourOhFourHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), FourOhFourHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{port}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        bbox = (54.0, 54.01, 45.0, 45.01)
+        result = download(store, bbox, url, zmin=10, zmax=10, workers=1)
+        assert result["failed"] == result["total"]
+        assert result["total"] > 0
+        # Каждый тайл запрошен ровно один раз (без ретраев по 4×).
+        assert len(hits) == result["total"]
+        assert store.count() == 0
+    finally:
+        server.shutdown()

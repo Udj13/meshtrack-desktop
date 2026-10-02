@@ -33,10 +33,9 @@ from .downloader import _format_size
 from .first_run_wizard import (
     DownloadThread,
     FirstRunWizard,
-    OPENTOPOMAP_BACKUP_TEMPLATE,
-    OPENTOPOMAP_TEMPLATE,
 )
 from .i18n import tr as _
+from .mapsources import default_source_id, get_source
 from .map_manager import (
     CORRUPTED,
     DOWNLOADED,
@@ -340,6 +339,8 @@ class MapManagerDialog(QDialog):
             return
         zmin = entry.zmin or 9
         zmax = entry.zmax or 15
+        source_id = entry.extra.get("tile_source") or default_source_id()
+        source = get_source(source_id)
 
         from .mapstore import MapStore
 
@@ -349,8 +350,8 @@ class MapManagerDialog(QDialog):
             bbox,
             zmin,
             zmax,
-            OPENTOPOMAP_TEMPLATE,
-            backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
+            source.url_template,
+            backup_url_template=source.backup_url_template,
             parent=self,
         )
         self._thread = thread
@@ -394,6 +395,7 @@ class MapManagerDialog(QDialog):
                 east=bbox[3],
                 zmin=zmin,
                 zmax=zmax,
+                tile_source=source_id,
             )
             self._save_settings()
             self._refresh()

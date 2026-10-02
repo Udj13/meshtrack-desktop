@@ -181,6 +181,11 @@
     "Западная граница должна быть меньше восточной": "Western bound must be lower than eastern",
     "Регион слишком велик (>10° по широте)": "Region too large (>10° latitude)",
     "Регион слишком велик (>10° по долготе)": "Region too large (>10° longitude)",
+    "Источник карты:": "Tile source:",
+    "OpenTopoMap (рельеф)": "OpenTopoMap (relief)",
+    "Рельеф и высоты; основной сервер иногда перегружен": "Relief and elevation; the main server is sometimes overloaded",
+    "Контуры и холмшейдинг": "Contours and hillshading",
+    "Стандартная схема, без рельефа": "Standard scheme, no relief",
 
     "Загрузка карты": "Downloading map",
     "Идёт скачивание тайлов…": "Downloading tiles…",

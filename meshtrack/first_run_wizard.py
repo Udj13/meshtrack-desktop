@@ -37,16 +37,11 @@ from . import downloader, regions
 from .downloader import estimate_tile_count
 from .i18n import DEFAULT_LANG, LANGUAGES, init_translator
 from .i18n import tr as _
+from .mapsources import TILE_SOURCES, default_source_id, get_source
 from .mapstore import MapStore
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
-
-# URL-шаблон OpenTopoMap (PROJECT.md §8).
-OPENTOPOMAP_TEMPLATE = "https://tile.opentopomap.org/{z}/{x}/{y}.png"
-# Официальный резервный сервер OpenTopoMap (roadmap на opentopomap.org):
-# основной иногда отвечает анти-бот HTML/таймаутами — тайл пробуется и с него.
-OPENTOPOMAP_BACKUP_TEMPLATE = "https://backup.opentopomap.org/{z}/{x}/{y}.png"
 
 
 class DownloadThread(QThread):
@@ -185,6 +180,11 @@ class RegionPage(QWizardPage):
         self._lbl_west = QLabel()
         self._lbl_east = QLabel()
 
+        self._source_label = QLabel()
+        self._source_combo = QComboBox()
+        self._fill_sources()
+        self._source_combo.setToolTip(_(self._sources_tooltip()))
+
         grid = QGridLayout()
         grid.addWidget(self._radio_prebuilt, 0, 0, 1, 2)
         grid.addWidget(self._list, 1, 0, 1, 2)
@@ -197,12 +197,32 @@ class RegionPage(QWizardPage):
         grid.addWidget(self._west, 5, 1)
         grid.addWidget(self._lbl_east, 6, 0)
         grid.addWidget(self._east, 6, 1)
+        grid.addWidget(self._source_label, 7, 0)
+        grid.addWidget(self._source_combo, 7, 1)
 
         layout = QVBoxLayout(self)
         layout.addLayout(grid)
         layout.addStretch()
         self.setLayout(layout)
         self.retranslate()
+
+    def _fill_sources(self) -> None:
+        """Заполняет комбо источниками; сохраняет выбор"""
+        current = self._source_combo.currentData()
+        self._source_combo.blockSignals(True)
+        self._source_combo.clear()
+        for source in TILE_SOURCES.values():
+            self._source_combo.addItem(_(source.name), source.id)
+        index = self._source_combo.findData(current)
+        if index >= 0:
+            self._source_combo.setCurrentIndex(index)
+        self._source_combo.blockSignals(False)
+
+    def _sources_tooltip(self) -> str:
+        return "; ".join(
+            _(s.name) + (" — " + _(s.note) if s.note else "")
+            for s in TILE_SOURCES.values()
+        )
 
     def retranslate(self):
         self.setTitle(_("Выбор региона"))
@@ -213,6 +233,13 @@ class RegionPage(QWizardPage):
         self._lbl_north.setText(_("Север:"))
         self._lbl_west.setText(_("Запад:"))
         self._lbl_east.setText(_("Восток:"))
+        self._source_label.setText(_("Источник карты:"))
+        self._fill_sources()
+        self._source_combo.setToolTip(self._sources_tooltip())
+
+    def selected_source_id(self) -> str:
+        """Идентификатор выбранного источника тайлов."""
+        return self._source_combo.currentData() or default_source_id()
 
     def _update_ui(self):
         prebuilt = self._radio_prebuilt.isChecked()
@@ -303,6 +330,7 @@ class DownloadPage(QWizardPage):
         zmin = wizard.zmin
         zmax = wizard.zmax
         dest = wizard.dest_path
+        source = get_source(wizard.tile_source_id)
 
         self._status.setText(
             _("Регион: {map_id}\nФайл: {dest}").format(map_id=map_id, dest=dest)
@@ -312,8 +340,9 @@ class DownloadPage(QWizardPage):
         store = MapStore(dest)
         self._store = store
         store.set_metadata("name", map_id)
-        store.set_metadata("format", "png")
+        store.set_metadata("format", source.tile_format)
         store.set_metadata("version", "1.1")
+        store.set_metadata("tile_source", source.id)
         south, north, west, east = bbox
         store.set_metadata("bbox", f"{south},{north},{west},{east}")
         store.set_metadata(
@@ -326,8 +355,8 @@ class DownloadPage(QWizardPage):
             bbox,
             zmin,
             zmax,
-            OPENTOPOMAP_TEMPLATE,
-            backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
+            source.url_template,
+            backup_url_template=source.backup_url_template,
             parent=self,
         )
         self._thread.progress.connect(self._on_progress)
@@ -482,6 +511,7 @@ class FirstRunWizard(QWizard):
         self.zmin = 9
         self.zmax = 15
         self.dest_path: str | None = None
+        self.tile_source_id: str = default_source_id()
 
         self._pages: list[QWizardPage] = []
         self._welcome_page: WelcomePage | None = None
@@ -535,6 +565,7 @@ class FirstRunWizard(QWizard):
         if page is self._region_page:
             region_id, bbox = self._region_page.selected_region()
             self.bbox = bbox
+            self.tile_source_id = self._region_page.selected_source_id()
             if region_id:
                 self.map_id = region_id
             else:
@@ -547,7 +578,12 @@ class FirstRunWizard(QWizard):
     def accept(self):
         # Сохраняем карту в настройках
         if self.map_id and self.dest_path:
-            self._settings.add_map(self.map_id, self.map_id, self.dest_path)
+            self._settings.add_map(
+                self.map_id,
+                self.map_id,
+                self.dest_path,
+                tile_source=self.tile_source_id,
+            )
             self._settings.active_map_id = self.map_id
             try:
                 self._settings.save()

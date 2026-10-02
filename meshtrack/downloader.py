@@ -5,6 +5,7 @@
 - rate-limit ≥ 200 мс на хост;
 - resume (пропуск уже скачанных тайлов в MapStore);
 - экспоненциальный backoff при 429/5xx;
+- предохранитель: после неудач основного источника тайлы берутся только с резервного;
 - progress callback (downloaded, total);
 - отмену через threading.Event.
 """
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 # Минимальная задержка между запросами к одному хосту (сек).
 RATE_LIMIT_SECONDS = 0.2
 DEFAULT_WORKERS = 4
+
+# Тайл-серверы (в первую очередь OpenTopoMap) отвечают анти-бот блокировкой
+# на User-Agent по умолчанию (python-requests): фейковый JPEG 15457 Б или
+# таймаут. Браузерный UA + Accept заметно снижают долю таких ответов.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
 
 
 def _tile_xy(lat: float, lon: float, z: int) -> tuple[int, int]:
@@ -79,18 +88,29 @@ class TileDownloader:
         rate_limit: float = RATE_LIMIT_SECONDS,
         backup_url_template: str | None = None,
         max_attempts: int = 4,
+        primary_fail_threshold: int = 3,
     ):
         self.store = store
         self.url_template = url_template
         self.backup_url_template = backup_url_template
         self.rate_limit = rate_limit
         self.max_attempts = max_attempts
+        self.primary_fail_threshold = max(1, primary_fail_threshold)
         self._last_fetch: dict[str, float] = {}
         self._last_lock = threading.Lock()
         self._session = requests.Session()
+        self._session.headers["User-Agent"] = DEFAULT_USER_AGENT
+        self._session.headers["Accept"] = (
+            "image/avif,image/webp,image/png,image/jpeg,image/*,*/*;q=0.8"
+        )
         # Одноразовое INFO при переключении на резервный источник.
         self._switch_notified = False
         self._switch_lock = threading.Lock()
+        # Предохранитель: после накопленных неудач основного источника
+        # весь оставшийся прогон тайлы берутся только с резервного.
+        self._primary_failures = 0
+        self._primary_degraded = False
+        self._degrade_lock = threading.Lock()
 
     def _wait_for_rate_limit(self, host: str) -> None:
         with self._last_lock:
@@ -113,6 +133,10 @@ class TileDownloader:
         Например, при двух источниках и 4 попытках: основной → резервный →
         основной → резервный. Фолбэк на резервный срабатывает уже после
         первой неудачи основного, а не после порога ретраев на нём.
+
+        Если основной источник накопил `primary_fail_threshold` неудач,
+        срабатывает предохранитель: до конца закачки он не запрашивается
+        вовсе, тайлы берутся только с резервного.
         """
         if cancel_event is not None and cancel_event.is_set():
             return z, x, y, None, None
@@ -121,16 +145,20 @@ class TileDownloader:
         if self.store.has(z, x, y):
             return z, x, y, b"", None  # пустые bytes = "уже есть"
 
-        templates = [self.url_template]
-        if self.backup_url_template:
-            templates.append(self.backup_url_template)
-
         attempts = 0
         backoff = 1.0
+        # Источники, от которых для этого тайла получен «вот его тут нет»
+        # (4xx кроме 429) — повторять их для того же тайла бессмысленно.
+        dead: set[str] = set()
         while attempts < self.max_attempts:
             if cancel_event is not None and cancel_event.is_set():
                 return z, x, y, None, None
 
+            templates = [t for t in self._active_templates() if t not in dead]
+            if not templates:
+                # Все источники для этого тайла дали 4xx — выходим сразу,
+                # без лишних 4–5 запросов в один и тот же URL.
+                break
             template = templates[attempts % len(templates)]
             url = template.format(z=z, x=x, y=y)
             host = url.split("/", 3)[2] if "//" in url else url
@@ -141,6 +169,8 @@ class TileDownloader:
                 resp = self._session.get(url, timeout=30)
             except requests.RequestException as exc:
                 logger.warning("Ошибка загрузки %s: %s", url, exc)
+                if template is self.url_template:
+                    self._register_primary_failure()
                 attempts += 1
                 time.sleep(backoff)
                 backoff *= 2
@@ -148,14 +178,16 @@ class TileDownloader:
 
             if resp.status_code == 200:
                 if not is_valid_tile_blob(resp.content):
-                    # HTTP 200, но тело — не PNG (html-страница ошибки/
+                    # HTTP 200, но тело — не тайл (html-страница ошибки/
                     # rate-limit от прокси). Такое в хранилище писать нельзя.
                     logger.warning(
-                        "HTTP 200, но ответ не PNG (%d байт) для %s, попытка %d",
+                        "HTTP 200, но ответ не тайл (%d байт) для %s, попытка %d",
                         len(resp.content),
                         url,
                         attempts + 1,
                     )
+                    if template is self.url_template:
+                        self._register_primary_failure()
                     attempts += 1
                     time.sleep(backoff)
                     backoff *= 2
@@ -171,14 +203,19 @@ class TileDownloader:
                     url,
                     attempts + 1,
                 )
+                if template is self.url_template:
+                    self._register_primary_failure()
                 attempts += 1
                 time.sleep(backoff)
                 backoff *= 2
                 continue
-            # Прочие 4xx повторять бессмысленно — пробуем следующий источник.
+            # Прочие 4xx (например, 404): тайла тут нет навсегда. Пробуем
+            # следующий источник, если он есть; этот больше не трогаем.
             logger.warning("HTTP %d для %s", resp.status_code, url)
+            dead.add(template)
             attempts += 1
 
+        templates = self._active_templates()
         logger.error(
             "Не удалось загрузить %d/%d/%d ни из одного источника: %s",
             z,
@@ -187,6 +224,50 @@ class TileDownloader:
             ", ".join(t.format(z=z, x=x, y=y) for t in templates),
         )
         return z, x, y, None, None
+
+    def _active_templates(self) -> list[str]:
+        """Список источников с учётом состояния предохранителя.
+
+        Пока основной источник не помечен деградированным — оба источника;
+        после срабатывания предохранителя — только резервный.
+        """
+        templates = [self.url_template]
+        if self.backup_url_template:
+            templates.append(self.backup_url_template)
+        if self._use_backup_only() and self.backup_url_template:
+            return [self.backup_url_template]
+        return templates
+
+    def _use_backup_only(self) -> bool:
+        with self._degrade_lock:
+            return self._primary_degraded
+
+    def _register_primary_failure(self) -> None:
+        """Учитывает неудачу основного источника.
+
+        После `primary_fail_threshold` накопленных неудач основной источник
+        помечается деградированным — до конца закачки он больше не
+        запрашивается, тайлы берутся только с резервного. Без резервного
+        источника ничего не делает.
+        """
+        if not self.backup_url_template:
+            return
+        with self._degrade_lock:
+            self._primary_failures += 1
+            if self._primary_degraded:
+                return
+            if self._primary_failures < self.primary_fail_threshold:
+                return
+            self._primary_degraded = True
+        host = self.backup_url_template
+        if "//" in host:
+            host = host.split("/", 3)[2]
+        logger.warning(
+            "Основной тайл-сервер стабильно отвечает ошибками "
+            "(%d неудач) — до конца закачки тайлы берутся с резервного: %s",
+            self._primary_failures,
+            host,
+        )
 
     def _notify_switch_to_backup(self) -> None:
         """Логирует переключение на резервный источник один раз на закачку."""
@@ -238,6 +319,7 @@ def download(
     *,
     backup_url_template: str | None = None,
     max_attempts: int = 4,
+    primary_fail_threshold: int = 3,
 ) -> dict:
     """Скачивает область bbox в MapStore.
 
@@ -259,6 +341,10 @@ def download(
         max_attempts: сколько запросов суммарно тратится на один тайл по всем
             источникам (по умолчанию 4; при двух источниках это два полных
             круга основной → резервный).
+        primary_fail_threshold: после скольких накопленных неудач основного
+            источника включить предохранитель — до конца закачки тайлы берутся
+            только с резервного, основной больше не запрашивается
+            (по умолчанию 3).
 
     Возвращает dict:
         total: общее число тайлов
@@ -283,6 +369,7 @@ def download(
         url_template,
         backup_url_template=backup_url_template,
         max_attempts=max_attempts,
+        primary_fail_threshold=primary_fail_threshold,
     )
 
     downloaded = 0

@@ -4,6 +4,7 @@
 минимальные ключи: retention_days и track_color_mode. В Фазе 5 схема
 расширится до полноценных настроек.
 """
+
 from __future__ import annotations
 
 import json
@@ -84,7 +85,8 @@ class Settings:
             self._config["maps"] = []
         # Убираем записи без обязательных полей
         self._config["maps"] = [
-            m for m in self._config["maps"]
+            m
+            for m in self._config["maps"]
             if isinstance(m, dict) and m.get("id") and m.get("path")
         ]
         self._config["language"] = (
@@ -215,6 +217,7 @@ class Settings:
         east: float | None = None,
         zmin: int | None = None,
         zmax: int | None = None,
+        tile_source: str | None = None,
     ) -> None:
         """Добавляет или обновляет карту. Дополнительные поля сохраняются, если заданы."""
         extra = {}
@@ -230,6 +233,8 @@ class Settings:
             extra["zmin"] = zmin
         if zmax is not None:
             extra["zmax"] = zmax
+        if tile_source is not None:
+            extra["tile_source"] = tile_source
         maps = self._config.get("maps", [])
         for m in maps:
             if m.get("id") == map_id:

@@ -21,11 +21,9 @@ from meshtrack.downloader import (
     download,
     estimate_tile_count,
 )
+from meshtrack.mapsources import TILE_SOURCES, get_source
 from meshtrack.mapstore import MapStore
 from meshtrack.regions import get_prebuilt
-
-OPENTOPOMAP_TEMPLATE = "https://tile.opentopomap.org/{z}/{x}/{y}.png"
-OPENTOPOMAP_BACKUP_TEMPLATE = "https://backup.opentopomap.org/{z}/{x}/{y}.png"
 
 
 def parse_bbox(s: str) -> tuple[float, float, float, float]:
@@ -42,8 +40,16 @@ def main():
     ap.add_argument("--zmin", type=int, default=9)
     ap.add_argument("--zmax", type=int, default=15)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument(
+        "--source",
+        default="opentopomap",
+        choices=sorted(TILE_SOURCES),
+        help="источник тайлов (по умолчанию opentopomap)",
+    )
     ap.add_argument("--out", required=True, help="путь к .mbtiles")
     args = ap.parse_args()
+
+    source = get_source(args.source)
 
     if args.region:
         region = get_prebuilt(args.region)
@@ -63,7 +69,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     store = MapStore(out)
     store.set_metadata("name", map_id)
-    store.set_metadata("format", "png")
+    store.set_metadata("format", source.tile_format)
+    store.set_metadata("tile_source", source.id)
     store.set_metadata("version", "1.1")
     south, north, west, east = bbox
     store.set_metadata("bbox", f"{south},{north},{west},{east}")
@@ -84,16 +91,16 @@ def main():
             flush=True,
         )
 
-    print(f"Скачивание {map_id} -> {out}")
+    print(f"Скачивание {map_id} -> {out} (источник: {source.id})")
     result = download(
         store,
         bbox,
-        OPENTOPOMAP_TEMPLATE,
+        source.url_template,
         zmin=args.zmin,
         zmax=args.zmax,
         workers=args.workers,
         on_progress=on_progress,
-        backup_url_template=OPENTOPOMAP_BACKUP_TEMPLATE,
+        backup_url_template=source.backup_url_template,
     )
     if result.get("failed", 0) == 0:
         store.set_metadata("complete", "1")

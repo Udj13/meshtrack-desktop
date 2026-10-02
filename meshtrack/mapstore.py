@@ -18,18 +18,30 @@ from typing import Iterable
 
 # Сигнатура PNG (первые 8 байт любого PNG-файла).
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+# Сигнатура JPEG: SOI (0xFF 0xD8) + маркер 0xFF (любой следующий токен).
+JPEG_MAGIC = b"\xff\xd8\xff"
 
 
 def is_valid_tile_blob(data: bytes | bytearray | None) -> bool:
-    """True, если blob — валидный PNG-тайл.
+    """True, если blob — валидный растровый тайл (PNG или JPEG).
 
     Отделяет настоящие тайлы от «битых»: html-страниц ошибок (429/200 waf),
     пустых ответов и т.п., которые иногда приходят от тайл-серверов и не
-    должны попадать в MBTiles.
+    должны попадать в MBTiles. JPEG принимается, потому что часть топо-схем
+    (например, Esri World Topo) отдаёт тайлы в JPEG.
     """
     if not isinstance(data, (bytes, bytearray)):
         return False
-    return bytes(data[:8]) == PNG_MAGIC
+    if bytes(data[:8]) == PNG_MAGIC:
+        return True
+    return bytes(data[:3]) == JPEG_MAGIC
+
+
+def tile_content_type(data: bytes | bytearray) -> bytes:
+    """Формат тайла по сигнатуре: 'image/png' для PNG, иначе 'image/jpeg'."""
+    if bytes(data[:8]) == PNG_MAGIC:
+        return b"image/png"
+    return b"image/jpeg"
 
 
 class MapStore:
@@ -217,14 +229,16 @@ class MapStore:
                 ).fetchone()[0]
                 invalid = conn.execute(
                     "SELECT COUNT(*) FROM tiles "
-                    "WHERE tile_data IS NOT NULL AND substr(tile_data, 1, 8) != ?",
-                    (PNG_MAGIC,),
+                    "WHERE tile_data IS NOT NULL "
+                    "AND substr(tile_data, 1, 8) != ? "
+                    "AND substr(tile_data, 1, 3) != ?",
+                    (PNG_MAGIC, JPEG_MAGIC),
                 ).fetchone()[0]
                 if nulls:
                     errors.append(f"{nulls} tiles with NULL tile_data")
                 if invalid:
                     errors.append(
-                        f"{invalid} tiles with non-PNG data "
+                        f"{invalid} tiles with non-tile data "
                         "(HTML/ошибка сервера) — перекачайте карту"
                     )
                 return {

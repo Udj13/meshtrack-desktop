@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from meshtrack.mapstore import PNG_MAGIC, MapStore, is_valid_tile_blob
+from meshtrack.mapstore import (
+    JPEG_MAGIC,
+    PNG_MAGIC,
+    MapStore,
+    is_valid_tile_blob,
+    tile_content_type,
+)
 
 
 @pytest.fixture
@@ -91,10 +97,23 @@ def test_minmax_zoom_default_when_empty(store: MapStore):
 
 def test_is_valid_tile_blob():
     assert is_valid_tile_blob(PNG_MAGIC + b"data") is True
+    assert is_valid_tile_blob(JPEG_MAGIC + b"\xd8\xff\xe0fake") is True
     assert is_valid_tile_blob(b"<!DOCTYPE html><html></html>") is False
     assert is_valid_tile_blob(b"") is False
     assert is_valid_tile_blob(None) is False
     assert is_valid_tile_blob(b"\x89PNG") is False  # неполная сигнатура
+
+
+def test_tile_content_type():
+    assert tile_content_type(PNG_MAGIC + b"data") == b"image/png"
+    assert tile_content_type(JPEG_MAGIC + b"\xe0fake") == b"image/jpeg"
+
+
+def test_verify_accepts_jpeg(store: MapStore):
+    store.insert(10, 1, 1, JPEG_MAGIC + b"\xe0" + b"\x00" * 64)
+    report = store.verify()
+    assert report["ok"] is True
+    assert report["errors"] == []
 
 
 def test_has_needs_valid_png(store: MapStore):
@@ -109,4 +128,4 @@ def test_verify_reports_invalid_tiles(store: MapStore):
     store.insert(10, 1, 2, b"<!DOCTYPE html>")  # битый
     report = store.verify()
     assert report["ok"] is False
-    assert any("non-PNG" in e for e in report["errors"])
+    assert any("non-tile" in e for e in report["errors"])

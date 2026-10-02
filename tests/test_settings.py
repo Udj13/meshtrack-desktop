@@ -1,4 +1,5 @@
 """Тесты meshtrack/settings.py (headless)."""
+
 import json
 from pathlib import Path
 
@@ -65,8 +66,9 @@ def test_phase5_roundtrip(tmp_path: Path):
 
 def test_phase5_invalid_baud_normalized(tmp_path: Path):
     path = tmp_path / "bad.json"
-    path.write_text(json.dumps({"baud": "abc", "traccar_on": 1, "port_pref": 5}),
-                    encoding="utf-8")
+    path.write_text(
+        json.dumps({"baud": "abc", "traccar_on": 1, "port_pref": 5}), encoding="utf-8"
+    )
     cfg = Settings(path)
     assert cfg.baud == 115200
     assert cfg.traccar_on is True
@@ -170,6 +172,13 @@ def test_add_map_without_extra_fields(tmp_path: Path):
     cfg.add_map("mordovia", "Мордовия", "/tmp/mordovia.mbtiles")
     m = cfg.maps[0]
     assert set(m) == {"id", "name", "path"}
+
+
+def test_add_map_with_tile_source(tmp_path: Path):
+    cfg = Settings(tmp_path / "config.json")
+    cfg.add_map("m", "M", "/m.mbtiles", tile_source="esri_topo")
+    m = cfg.maps[0]
+    assert m["tile_source"] == "esri_topo"
 
 
 def test_add_map_updates_extra_fields(tmp_path: Path):
